@@ -312,6 +312,13 @@ export default function TipsterPainel() {
     ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: ${T.bg}; } ::-webkit-scrollbar-thumb { background: ${T.border}; border-radius: 3px; }
     select, input { background: ${T.bgCard}; color: ${T.text}; border: 1px solid ${T.border}; border-radius: 10px; padding: 10px 12px; font-size: 14px; outline: none; width: 100%; }
     select:focus, input:focus { border-color: ${T.blue}; }
+    .legs-grid { display: grid; gap: 8px; margin-bottom: 14px; }
+    .legs-2 { grid-template-columns: 1fr 1fr; }
+    .legs-3 { grid-template-columns: 1fr 1fr 1fr; }
+    .legs-4 { grid-template-columns: 1fr 1fr; }
+    .leg-card { padding: 8px 12px; border-radius: 10px; background: ${T.bg}; border: 1px solid ${T.border}; position: relative; text-align: center; }
+    .leg-card .odd-top { position: absolute; top: 6px; right: 10px; font-size: 13px; font-family: monospace; font-weight: 800; color: ${T.blue}; }
+    @media (max-width: 600px) { .legs-grid { grid-template-columns: 1fr !important; } }
   `;
 
   if (loading) return (
@@ -893,22 +900,20 @@ function CardAposta({ aposta, bancaMomentoCalc, expandido, setExpandido, editand
 
           {/* Legs */}
           {(aposta.detalhes ?? []).length > 0 && (
-            <div style={{ display:"flex", flexDirection:"column", gap:6, marginBottom:14 }}>
+            <div className={`legs-grid ${nLegs === 2 ? "legs-2" : nLegs === 3 ? "legs-3" : "legs-4"}`}>
               {aposta.detalhes!.map((d, i) => (
-                <div key={d.id} style={{ display:"flex", justifyContent:"space-between", gap:12, padding:"11px 14px", borderRadius:10, background:T.bg, border:`1px solid ${T.border}` }}>
-                  <div style={{ flex:1 }}>
-                    {nLegs > 1 && (
-                      <span style={{ fontSize:10, fontWeight:700, color:T.muted, display:"block", marginBottom:3, textTransform:"uppercase", letterSpacing:1 }}>
-                        Leg {i+1} · {d.esporte}
-                      </span>
-                    )}
-                    <p style={{ fontSize:13, fontWeight:600, color:T.text, marginBottom:2 }}>{d.jogo}</p>
-                    <p style={{ fontSize:11, color:T.muted, marginBottom:3 }}>{d.campeonato}</p>
-                    <p style={{ fontSize:12, color:T.muted }}>
-                      {d.mercado}: <span style={{ color:T.blue, fontWeight:700 }}>{d.selecao}</span>
-                    </p>
-                  </div>
-                  <span style={{ fontSize:15, fontFamily:"monospace", fontWeight:800, color:T.blue }}>@{d.odd_parcial}</span>
+                <div key={d.id} className="leg-card">
+                  <span className="odd-top">@{d.odd_parcial}</span>
+                  {nLegs > 1 && (
+                    <span style={{ fontSize:10, fontWeight:700, color:T.muted, display:"block", marginBottom:3, textTransform:"uppercase", letterSpacing:1 }}>
+                      Leg {i+1} · {d.esporte}
+                    </span>
+                  )}
+                  <p style={{ fontSize:12, fontWeight:600, color:T.text, marginBottom:2 }}>{d.jogo}</p>
+                  <p style={{ fontSize:10, color:T.muted, marginBottom:3 }}>{d.campeonato}</p>
+                  <p style={{ fontSize:11, color:T.muted }}>
+                    {d.mercado}: <span style={{ color:T.blue, fontWeight:700 }}>{d.selecao}</span>
+                  </p>
                 </div>
               ))}
             </div>
