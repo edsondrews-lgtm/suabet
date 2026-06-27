@@ -8,7 +8,7 @@ import {
 // ── Types ──
 type Resultado = "pendente" | "green" | "red" | "void";
 type Tipo = "simples" | "bonus";
-type Aba = "resumo" | "simples" | "duplas" | "triplas" | "combinadas" | "bonus" | "programacao";
+type Aba = "resumo" | "pendentes" | "simples" | "duplas" | "triplas" | "combinadas" | "bonus" | "programacao";
 
 interface Detalhe {
   id: string; aposta_id: string; esporte: string; campeonato: string;
@@ -178,6 +178,7 @@ export default function TipsterPainel() {
   // ── Derived data ──
   const simples = apostas.filter(a => a.tipo === "simples");
   const bonus = apostas.filter(a => a.tipo === "bonus");
+  const pendentes = apostas.filter(a => a.resultado === "pendente" && a.tipo !== "bonus");
   const simplesUm = simples.filter(a => (a.detalhes?.length ?? 0) <= 1);
   const simplesDupla = simples.filter(a => (a.detalhes?.length ?? 0) === 2);
   const simplesTripla = simples.filter(a => (a.detalhes?.length ?? 0) === 3);
@@ -200,7 +201,6 @@ export default function TipsterPainel() {
   const resolvidasSimples = simples.filter(a => a.resultado !== "pendente" && a.resultado !== "void");
   const greens = resolvidasSimples.filter(a => a.resultado === "green");
   const reds = resolvidasSimples.filter(a => a.resultado === "red");
-  const pendentes = apostas.filter(a => a.resultado === "pendente");
   const taxaAcerto = resolvidasSimples.length > 0 ? (greens.length / resolvidasSimples.length * 100) : 0;
   const lucroSimples = resolvidasSimples.reduce((s, a) => s + lucroCalc(a), 0);
   const yieldPct = ((bancaAtual - BANCA_INICIAL) / BANCA_INICIAL * 100);
@@ -321,6 +321,7 @@ export default function TipsterPainel() {
 
   const abasMapa: { key: Aba; label: string; count?: number }[] = [
     { key:"resumo", label:"Resumo" },
+    { key:"pendentes", label:"Pendentes", count:pendentes.length },
     { key:"simples", label:"Simples", count:simplesUm.length },
     { key:"duplas", label:"Duplas", count:simplesDupla.length },
     { key:"triplas", label:"Triplas", count:simplesTripla.length },
@@ -583,6 +584,24 @@ export default function TipsterPainel() {
                   </div>
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* ── ABA PENDENTES ── */}
+          {aba === "pendentes" && (
+            <div style={{ display:"flex", flexDirection:"column", gap:8, animation:"fadeIn 0.3s ease" }}>
+              {pendentes.length === 0 && (
+                <div style={{ textAlign:"center", padding:"60px 0", color:T.muted }}>
+                  <p style={{ fontSize:32, marginBottom:8 }}>✅</p>
+                  <p style={{ fontSize:14 }}>Nenhuma aposta pendente.</p>
+                </div>
+              )}
+              {[...pendentes].reverse().map(aposta => (
+                <CardAposta key={aposta.id} aposta={aposta} bancaMomentoCalc={bancaMomentoCalc}
+                  expandido={expandido} setExpandido={setExpandido}
+                  editando={editando} setEditando={setEditando}
+                  salvarResultado={salvarResultado} salvando={salvando} T={T} logado={logado} />
+              ))}
             </div>
           )}
 
