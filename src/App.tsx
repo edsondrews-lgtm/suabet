@@ -106,7 +106,6 @@ export default function TipsterPainel() {
   const [editProgramacao, setEditProgramacao] = useState<Programacao | null>(null);
   const [formProg, setFormProg] = useState({ casa: CASAS[0], dia_semana: DIAS_SEMANA[0], valor: "", observacao: "" });
   const [dark, setDark] = useState(true);
-  const [menuOpen, setMenuOpen] = useState(false);
   const bancaMomentoRef = useRef<Record<string, number>>({});
   const T = dark ? DARK : LIGHT;
 
@@ -437,7 +436,7 @@ export default function TipsterPainel() {
                       <XAxis dataKey="data" tick={{ fontSize:10, fill:T.muted }} axisLine={false} tickLine={false} />
                       <YAxis tick={{ fontSize:10, fill:T.muted }} tickFormatter={v=>`R$${v}`} domain={["auto","auto"]} axisLine={false} tickLine={false} width={72} />
                       <ReferenceLine y={BANCA_INICIAL} stroke={T.subtle} strokeDasharray="4 4" />
-                      <Tooltip formatter={(v:number) => [fmtBRL(v),"Banca"]} contentStyle={{ background:T.bgCard, border:`1px solid ${T.border}`, borderRadius:10, fontSize:12, color:T.text }} />
+                      <Tooltip formatter={(v) => [fmtBRL(Number(v)),"Banca"]} contentStyle={{ background:T.bgCard, border:`1px solid ${T.border}`, borderRadius:10, fontSize:12, color:T.text }} />
                       <Area type="monotone" dataKey="banca" stroke={isLucroPos ? T.green : T.red} strokeWidth={2.5} fill="url(#g1)" dot={false} activeDot={{ r:4, fill: isLucroPos ? T.green : T.red }} />
                     </AreaChart>
                   </ResponsiveContainer>
