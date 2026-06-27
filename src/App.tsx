@@ -174,6 +174,11 @@ export default function TipsterPainel() {
   async function excluirProgramacao(id: string) {
     await supabase.from("tipster_programacao").delete().eq("id", id); carregar();
   }
+  async function excluirAposta(id: string) {
+    await supabase.from("tipster_apostas_detalhes").delete().eq("aposta_id", id);
+    await supabase.from("tipster_apostas").delete().eq("id", id);
+    setExpandido(null); carregar();
+  }
 
   // ── Derived data ──
   const simples = apostas.filter(a => a.tipo === "simples");
@@ -600,7 +605,7 @@ export default function TipsterPainel() {
                 <CardAposta key={aposta.id} aposta={aposta} bancaMomentoCalc={bancaMomentoCalc}
                   expandido={expandido} setExpandido={setExpandido}
                   editando={editando} setEditando={setEditando}
-                  salvarResultado={salvarResultado} salvando={salvando} T={T} logado={logado} />
+                  salvarResultado={salvarResultado} salvando={salvando} T={T} logado={logado} excluirAposta={excluirAposta} />
               ))}
             </div>
           )}
@@ -626,7 +631,7 @@ export default function TipsterPainel() {
                   <CardAposta key={aposta.id} aposta={aposta} bancaMomentoCalc={bancaMomentoCalc}
                     expandido={expandido} setExpandido={setExpandido}
                     editando={editando} setEditando={setEditando}
-                    salvarResultado={salvarResultado} salvando={salvando} T={T} logado={logado} />
+                    salvarResultado={salvarResultado} salvando={salvando} T={T} logado={logado} excluirAposta={excluirAposta} />
                 ))}
               </div>
             );
@@ -660,7 +665,7 @@ export default function TipsterPainel() {
                 <CardAposta key={aposta.id} aposta={aposta} bancaMomentoCalc={{}}
                   expandido={expandido} setExpandido={setExpandido}
                   editando={editando} setEditando={setEditando}
-                  salvarResultado={salvarResultado} salvando={salvando} T={T} logado={logado} />
+                  salvarResultado={salvarResultado} salvando={salvando} T={T} logado={logado} excluirAposta={excluirAposta} />
               ))}
             </div>
           )}
@@ -791,12 +796,13 @@ export default function TipsterPainel() {
 }
 
 // ── Card de aposta ──
-function CardAposta({ aposta, bancaMomentoCalc, expandido, setExpandido, editando, setEditando, salvarResultado, salvando, T, logado }: {
+function CardAposta({ aposta, bancaMomentoCalc, expandido, setExpandido, editando, setEditando, salvarResultado, salvando, T, logado, excluirAposta }: {
   aposta: Aposta; bancaMomentoCalc?: Record<string, number>;
   expandido: string | null; setExpandido: (id: string | null) => void;
   editando: { id: string; resultado: Resultado } | null;
   setEditando: (v: { id: string; resultado: Resultado } | null) => void;
   salvarResultado: () => void; salvando: boolean; T: typeof DARK; logado: boolean;
+  excluirAposta: (id: string) => void;
 }) {
   const lucro = calcularLucro(aposta, bancaMomentoCalc?.[aposta.id]);
   const isExp = expandido === aposta.id;
@@ -927,9 +933,16 @@ function CardAposta({ aposta, bancaMomentoCalc, expandido, setExpandido, editand
                 </button>
               </>
             ) : (
-              logado && <button onClick={() => setEditando({ id:aposta.id, resultado:aposta.resultado })} style={{ padding:"7px 14px", borderRadius:8, border:"none", cursor:"pointer", background:T.blue, color:"white", fontSize:12, fontWeight:700 }}>
-                Editar
-              </button>
+              logado && (
+                <div style={{ display:"flex", gap:6 }}>
+                  <button onClick={() => setEditando({ id:aposta.id, resultado:aposta.resultado })} style={{ padding:"7px 14px", borderRadius:8, border:"none", cursor:"pointer", background:T.blue, color:"white", fontSize:12, fontWeight:700 }}>
+                    Editar
+                  </button>
+                  <button onClick={() => { if(confirm("Excluir esta aposta?")) excluirAposta(aposta.id); }} style={{ padding:"7px 14px", borderRadius:8, border:"none", cursor:"pointer", background:T.red, color:"white", fontSize:12, fontWeight:700 }}>
+                    Excluir
+                  </button>
+                </div>
+              )
             )}
           </div>
         </div>
