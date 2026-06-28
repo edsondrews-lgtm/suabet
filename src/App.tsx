@@ -190,9 +190,10 @@ export default function TipsterPainel() {
   const simplesCombinada = simples.filter(a => (a.detalhes?.length ?? 0) >= 4);
 
   const simplesOrdenadas = [...simples].sort((a, b) => a.data.localeCompare(b.data) || a.created_at.localeCompare(b.created_at));
+  const todasOrdenadas = [...apostas].sort((a, b) => a.data.localeCompare(b.data) || a.created_at.localeCompare(b.created_at));
   const bancaMomentoCalc: Record<string, number> = {};
   let bancaAcum = BANCA_INICIAL;
-  for (const a of simplesOrdenadas) {
+  for (const a of todasOrdenadas) {
     bancaMomentoCalc[a.id] = bancaAcum;
     if (a.resultado !== "pendente" && a.resultado !== "void") {
       bancaAcum = parseFloat((bancaAcum + calcularLucro(a, bancaAcum)).toFixed(2));
@@ -203,11 +204,12 @@ export default function TipsterPainel() {
 
   function lucroCalc(a: Aposta) { return calcularLucro(a, bancaMomentoCalc[a.id]); }
 
+  const resolvidas = apostas.filter(a => a.resultado !== "pendente" && a.resultado !== "void");
   const resolvidasSimples = simples.filter(a => a.resultado !== "pendente" && a.resultado !== "void");
-  const greens = resolvidasSimples.filter(a => a.resultado === "green");
-  const reds = resolvidasSimples.filter(a => a.resultado === "red");
-  const taxaAcerto = resolvidasSimples.length > 0 ? (greens.length / resolvidasSimples.length * 100) : 0;
-  const lucroSimples = resolvidasSimples.reduce((s, a) => s + lucroCalc(a), 0);
+  const greens = resolvidas.filter(a => a.resultado === "green");
+  const reds = resolvidas.filter(a => a.resultado === "red");
+  const taxaAcerto = resolvidas.length > 0 ? (greens.length / resolvidas.length * 100) : 0;
+  const lucroTotal = resolvidas.reduce((s, a) => s + lucroCalc(a), 0);
   const yieldPct = ((bancaAtual - BANCA_INICIAL) / BANCA_INICIAL * 100);
   const oddMedia = simples.length > 0 ? simples.reduce((s, a) => s + a.odd_total, 0) / simples.length : 0;
   const unidadesInvestidas = resolvidasSimples.reduce((s, a) => s + (a.stake_unidades ?? 0), 0);
@@ -445,7 +447,7 @@ export default function TipsterPainel() {
             {[
               { label:"Apostas", valor:String(apostas.length), sub:`${greens.length}G · ${reds.length}R · ${pendentes.length}P`, cor:T.text },
               { label:"Acerto", valor:`${taxaAcerto.toFixed(1)}%`, sub:`${resolvidasSimples.length} resolvidas`, cor: taxaAcerto>=55 ? T.green : taxaAcerto>0 ? T.red : T.text },
-              { label:"Yield", valor:`${yieldPct>=0?"+":""}${yieldPct.toFixed(1)}%`, sub:fmtBRL(lucroSimples), cor: lucroSimples>=0 ? T.green : T.red },
+              { label:"Yield", valor:`${yieldPct>=0?"+":""}${yieldPct.toFixed(1)}%`, sub:fmtBRL(lucroTotal), cor: lucroTotal>=0 ? T.green : T.red },
               { label:"Odd média", valor:oddMedia.toFixed(2), sub:"apostas simples", cor:T.text },
               { label:"Melhor seq.", valor:`${melhorSeq}G`, sub:"greens seguidos", cor: melhorSeq>=5 ? T.amber : T.text },
               { label:"Drawdown", valor:`${maxDrawdown.toFixed(1)}%`, sub:"queda máxima", cor: maxDrawdown>10 ? T.red : T.text },
