@@ -248,12 +248,13 @@ export default function TipsterPainel() {
   const topCasas = Object.entries(lucroPorCasa).sort((a, b) => b[1].lucro - a[1].lucro).slice(0, 4);
 
   const dadosGrafico = (() => {
-    if (simplesOrdenadas.length === 0) return [];
+    if (todasOrdenadas.length === 0) return [];
+    const resolvidas = apostas.filter(a => a.resultado !== "pendente" && a.resultado !== "void");
     const porData: Record<string, number> = {};
-    resolvidasSimples.forEach(a => { porData[a.data] = (porData[a.data] ?? 0) + lucroCalc(a); });
+    resolvidas.forEach(a => { porData[a.data] = (porData[a.data] ?? 0) + lucroCalc(a); });
     const resultado: { data: string; banca: number }[] = [];
     let acum = BANCA_INICIAL;
-    resultado.push({ data: fmtDataCurta(simplesOrdenadas[0].data), banca: acum });
+    resultado.push({ data: fmtDataCurta(todasOrdenadas[0].data), banca: acum });
     for (const d of Object.keys(porData).sort()) {
       acum = parseFloat((acum + porData[d]).toFixed(2));
       resultado.push({ data: fmtDataCurta(d), banca: acum });
@@ -290,7 +291,7 @@ export default function TipsterPainel() {
         acerto: d.count > 0 ? ((d.greens / d.count) * 100).toFixed(1) : "0"
       })),
     };
-    const prompt = `Você é um analista especializado em apostas esportivas. Gere um relatório narrativo profissional em português brasileiro sobre o desempenho do tipster Master com base nos dados abaixo.\n\nDADOS:\n${JSON.stringify(dadosParaAPI, null, 2)}\n\nESTRUTURA:\nINÍCIO DO ACOMPANHAMENTO: Quando foi iniciado, banca inicial, período coberto.\nDESEMPENHO GERAL: Total de apostas, taxa de acerto, yield%, ROI, lucro na banca.\nGESTÃO DE RISCO: Drawdown máximo, sequência atual, melhor sequência.\nBÔNUS CAPTURADOS: Quantos tentados, convertidos vs perdidos, valor capturado.\nPERFORMANCE POR CASA: Qual casa performou melhor.\nCONCLUSÃO: Avaliação geral.\n\nREGRAS: Sem asteriscos, sem markdown, texto corrido com parágrafos. Cada bloco começa com título em MAIÚSCULAS seguido de dois pontos. Tom profissional mas acessível.`;
+    const prompt = `Você é um analista especializado em apostas esportivas. Gere um relatório narrativo profissional em português brasileiro sobre o desempenho do tipster Master com base nos dados abaixo.\n\nDADOS:\n${JSON.stringify(dadosParaAPI, null, 2)}\n\nESTRUTURA:\nINÍCIO DO ACOMPANHAMENTO: Quando foi iniciado, banca inicial, período coberto.\nDESEMPENHO GERAL: Total de apostas, taxa de acerto, yield%, ROI, lucro na banca.\nGESTÃO DE RISCO: Drawdown máximo, sequência atual, melhor sequência.\nBÔNUS CAPTURADOS: Quantos tentados, convertidos vs perdidos, valor capturado. Explique quando houver picos na banca por conta de bonus convertidos (BOOM na banca).\nPERFORMANCE POR CASA: Qual casa performou melhor.\nCONCLUSÃO: Avaliação geral.\n\nREGRAS: Sem asteriscos, sem markdown, texto corrido com parágrafos. Cada bloco começa com título em MAIÚSCULAS seguido de dois pontos. Tom profissional mas acessível.`;
     try {
       const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
       if (!apiKey) { setTextoRelatorio("Chave Gemini não configurada no .env"); setGerandoRelatorio(false); return; }
