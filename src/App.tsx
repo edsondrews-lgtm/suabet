@@ -313,16 +313,16 @@ export default function TipsterPainel() {
       <div style={{ minHeight:"100vh", background:T.bg, paddingBottom:40 }}>
 
         {/* ── NAV ── */}
-        <nav style={{ background:T.bgCard, borderBottom:`1px solid ${T.border}`, position:"sticky", top:0, zIndex:100, backdropFilter:"blur(12px)" }}>
-          <div style={{ maxWidth:1200, margin:"0 auto", padding:"0 16px", display:"flex", alignItems:"center", justifyContent:"space-between", height:56 }}>
+        <nav className="nav-bar" style={{ background:T.bgCard, borderBottom:`1px solid ${T.border}`, position:"sticky", top:0, zIndex:100, backdropFilter:"blur(12px)" }}>
+          <div className="nav-inner" style={{ maxWidth:1200, margin:"0 auto", padding:"0 16px", display:"flex", alignItems:"center", justifyContent:"space-between", height:56 }}>
             <div style={{ display:"flex", alignItems:"center", gap:10 }}>
               <div style={{ width:32, height:32, borderRadius:8, background:`linear-gradient(135deg, ${T.blue}, #8B5CF6)`, display:"flex", alignItems:"center", justifyContent:"center" }}>
                 <span style={{ fontSize:16 }}>⚡</span>
               </div>
               <span style={{ fontWeight:800, fontSize:15, color:T.text, letterSpacing:-0.5 }}>Master Tipster</span>
             </div>
-            <div style={{ display:"flex", gap:8, alignItems:"center" }}>
-              <button onClick={carregar} style={{ padding:"6px 14px", borderRadius:8, border:`1px solid ${T.border}`, background:"transparent", color:T.muted, fontSize:12, fontWeight:600, cursor:"pointer" }}>↻ Atualizar</button>
+            <div className="nav-actions" style={{ display:"flex", gap:8, alignItems:"center" }}>
+              <button className="nav-btn-text" onClick={carregar} style={{ padding:"6px 14px", borderRadius:8, border:`1px solid ${T.border}`, background:"transparent", color:T.muted, fontSize:12, fontWeight:600, cursor:"pointer" }}>↻ Atualizar</button>
               <button onClick={gerarRelatorio} style={{ padding:"6px 14px", borderRadius:8, border:"none", background:T.blue, color:"white", fontSize:12, fontWeight:700, cursor:"pointer" }}>📊 Relatório</button>
               <button onClick={() => setDark(!dark)} style={{ width:36, height:36, borderRadius:8, border:`1px solid ${T.border}`, background:"transparent", color:T.muted, cursor:"pointer", fontSize:16, display:"flex", alignItems:"center", justifyContent:"center" }}>
                 {dark ? "☀️" : "🌙"}
@@ -334,7 +334,7 @@ export default function TipsterPainel() {
         <div style={{ maxWidth:1200, margin:"0 auto", padding:"20px 16px" }}>
 
           {/* ── HERO ── */}
-          <div style={{
+          <div className="hero-card" style={{
             background: dark ? "linear-gradient(135deg, #0F172A 0%, #1a2744 50%, #0F172A 100%)" : "linear-gradient(135deg, #EFF6FF 0%, #DBEAFE 50%, #EFF6FF 100%)",
             borderRadius:20, padding:"24px 28px", marginBottom:20,
             border:`1px solid ${T.border}`, position:"relative", overflow:"hidden"
@@ -342,7 +342,7 @@ export default function TipsterPainel() {
             {/* glow */}
             <div style={{ position:"absolute", top:-60, right:-60, width:200, height:200, borderRadius:"50%", background: isLucroPos ? `radial-gradient(circle, ${T.green}20, transparent 70%)` : `radial-gradient(circle, ${T.red}20, transparent 70%)`, pointerEvents:"none" }} />
 
-            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", flexWrap:"wrap", gap:16, position:"relative" }}>
+            <div className="hero-row" style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", flexWrap:"wrap", gap:16, position:"relative" }}>
               <div>
                 <p style={{ fontSize:11, fontWeight:700, letterSpacing:3, color:T.muted, textTransform:"uppercase", marginBottom:6 }}>
                   Tipster · banca base {fmtBRL(BANCA_INICIAL)}
@@ -380,7 +380,7 @@ export default function TipsterPainel() {
           </div>
 
           {/* ── MÉTRICAS ── */}
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(140px, 1fr))", gap:10, marginBottom:20 }}>
+          <div className="metrics-grid" style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(140px, 1fr))", gap:10, marginBottom:20 }}>
             {[
               { label:"Apostas", valor:String(apostas.length), sub:`${greens.length}G · ${reds.length}R · ${pendentes.length}P`, cor:T.text },
               { label:"Acerto", valor:`${taxaAcerto.toFixed(1)}%`, sub:`${resolvidasSimples.length} resolvidas`, cor: taxaAcerto>=55 ? T.green : taxaAcerto>0 ? T.red : T.text },
@@ -445,7 +445,7 @@ export default function TipsterPainel() {
               )}
 
               {/* Stats row */}
-              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+              <div className="stats-row" style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
                 {/* Distribuição */}
                 <div style={{ borderRadius:16, padding:20, background:T.bgCard, border:`1px solid ${T.border}` }}>
                   <p style={{ fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:1.5, color:T.muted, marginBottom:16 }}>Distribuição</p>
@@ -490,7 +490,7 @@ export default function TipsterPainel() {
               </div>
 
               {/* Bônus + últimas */}
-              <div style={{ display:"grid", gridTemplateColumns:"260px 1fr", gap:12 }}>
+              <div className="bonus-row" style={{ display:"grid", gridTemplateColumns:"260px 1fr", gap:12 }}>
                 <div style={{ borderRadius:16, padding:20, background:T.bgCard, border:`1px solid ${T.border}` }}>
                   <p style={{ fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:1.5, color:T.muted, marginBottom:16 }}>Bônus</p>
                   {[
@@ -569,7 +569,7 @@ export default function TipsterPainel() {
           {aba === "bonus" && (
             <div style={{ display:"flex", flexDirection:"column", gap:10, animation:"fadeIn 0.3s ease" }}>
               {listaBonus.length > 0 && (
-                <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:10, marginBottom:6 }}>
+                <div className="bonus-stats-grid" style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:10, marginBottom:6 }}>
                   {[
                     { label:"Total", valor:String(bonus.length), cor:T.text },
                     { label:"Convertidos", valor:String(greenBonus), cor:T.green },
@@ -605,7 +605,7 @@ export default function TipsterPainel() {
                 <p style={{ fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:1.5, color:T.muted }}>Programação semanal de bônus</p>
                 <button onClick={abrirNovaProgramacao} style={{ padding:"8px 16px", borderRadius:8, border:"none", background:T.blue, color:"white", fontSize:12, fontWeight:700, cursor:"pointer" }}>+ Nova</button>
               </div>
-              <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:8 }}>
+              <div className="prog-grid" style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:8 }}>
                 {DIAS_SEMANA.map(dia => {
                   const itens = programacao.filter(p => p.dia_semana === dia);
                   return (
@@ -702,21 +702,20 @@ export default function TipsterPainel() {
       {/* ── Responsive CSS ── */}
       <style>{`
         @media (max-width: 768px) {
-          /* hero */
+          .nav-btn-text { display: none !important; }
+          .hero-card { padding: 18px 16px !important; }
           .hero-row { flex-direction: column !important; }
-          /* metrics grid */
+          .hero-row > div:last-child { text-align: left !important; }
           .metrics-grid { grid-template-columns: repeat(2, 1fr) !important; }
-          /* stats row */
           .stats-row { grid-template-columns: 1fr !important; }
-          /* bonus + ultimas */
           .bonus-row { grid-template-columns: 1fr !important; }
-          /* programacao */
+          .bonus-stats-grid { grid-template-columns: repeat(2, 1fr) !important; }
           .prog-grid { grid-template-columns: repeat(3, 1fr) !important; }
-          /* bonus tabs */
-          .bonus-tabs { grid-template-columns: repeat(2, 1fr) !important; }
         }
         @media (max-width: 480px) {
+          .metrics-grid { grid-template-columns: repeat(2, 1fr) !important; }
           .prog-grid { grid-template-columns: repeat(2, 1fr) !important; }
+          .bonus-stats-grid { grid-template-columns: repeat(2, 1fr) !important; }
         }
       `}</style>
     </>
