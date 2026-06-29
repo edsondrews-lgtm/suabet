@@ -161,10 +161,10 @@ export default function TipsterPainel() {
   const simplesTripla = simples.filter(a => (a.detalhes?.length ?? 0) === 3);
   const simplesCombinada = simples.filter(a => (a.detalhes?.length ?? 0) >= 4);
 
-  const simplesOrdenadas = [...simples].sort((a, b) => a.data.localeCompare(b.data) || a.created_at.localeCompare(b.created_at));
+  const todasOrdenadas = [...apostas].sort((a, b) => a.data.localeCompare(b.data) || a.created_at.localeCompare(b.created_at));
   const bancaMomentoCalc: Record<string, number> = {};
   let bancaAcum = BANCA_INICIAL;
-  for (const a of simplesOrdenadas) {
+  for (const a of todasOrdenadas) {
     bancaMomentoCalc[a.id] = bancaAcum;
     if (a.resultado !== "pendente" && a.resultado !== "void") {
       bancaAcum = parseFloat((bancaAcum + calcularLucro(a, bancaAcum)).toFixed(2));
@@ -176,6 +176,7 @@ export default function TipsterPainel() {
   function lucroCalc(a: Aposta) { return calcularLucro(a, bancaMomentoCalc[a.id]); }
 
   const resolvidasSimples = simples.filter(a => a.resultado !== "pendente" && a.resultado !== "void");
+  const todasResolvidas = apostas.filter(a => a.resultado !== "pendente" && a.resultado !== "void");
   const greens = resolvidasSimples.filter(a => a.resultado === "green");
   const reds = resolvidasSimples.filter(a => a.resultado === "red");
   const pendentes = apostas.filter(a => a.resultado === "pendente");
@@ -191,18 +192,18 @@ export default function TipsterPainel() {
   const roiUnidades = unidadesInvestidas > 0 ? (unidadesLucro / unidadesInvestidas * 100) : 0;
 
   let sequencia = 0, tipoSeq: "green" | "red" | null = null;
-  for (const a of [...simplesOrdenadas].reverse()) {
+  for (const a of [...todasOrdenadas].reverse()) {
     if (a.resultado === "pendente" || a.resultado === "void") continue;
     if (tipoSeq === null) tipoSeq = a.resultado as "green" | "red";
     if (a.resultado === tipoSeq) sequencia++; else break;
   }
   let melhorSeq = 0, seqTemp = 0;
-  for (const a of simplesOrdenadas) {
+  for (const a of todasOrdenadas) {
     if (a.resultado === "green") { seqTemp++; melhorSeq = Math.max(melhorSeq, seqTemp); }
     else if (a.resultado === "red") seqTemp = 0;
   }
   let peakBanca = BANCA_INICIAL, maxDrawdown = 0, acumDD = BANCA_INICIAL;
-  for (const a of resolvidasSimples) {
+  for (const a of todasResolvidas) {
     acumDD = parseFloat((acumDD + lucroCalc(a)).toFixed(2));
     if (acumDD > peakBanca) peakBanca = acumDD;
     const dd = ((peakBanca - acumDD) / peakBanca) * 100;
@@ -219,12 +220,13 @@ export default function TipsterPainel() {
   const topCasas = Object.entries(lucroPorCasa).sort((a, b) => b[1].lucro - a[1].lucro).slice(0, 4);
 
   const dadosGrafico = (() => {
-    if (simplesOrdenadas.length === 0) return [];
+    if (todasOrdenadas.length === 0) return [];
+    const resolvidas = todasOrdenadas.filter(a => a.resultado !== "pendente" && a.resultado !== "void");
     const porData: Record<string, number> = {};
-    resolvidasSimples.forEach(a => { porData[a.data] = (porData[a.data] ?? 0) + lucroCalc(a); });
+    resolvidas.forEach(a => { porData[a.data] = (porData[a.data] ?? 0) + lucroCalc(a); });
     const resultado: { data: string; banca: number }[] = [];
     let acum = BANCA_INICIAL;
-    resultado.push({ data: fmtDataCurta(simplesOrdenadas[0].data), banca: acum });
+    resultado.push({ data: fmtDataCurta(todasOrdenadas[0].data), banca: acum });
     for (const d of Object.keys(porData).sort()) {
       acum = parseFloat((acum + porData[d]).toFixed(2));
       resultado.push({ data: fmtDataCurta(d), banca: acum });
@@ -237,14 +239,14 @@ export default function TipsterPainel() {
   const greenBonus = bonus.filter(a => a.resultado === "green").length;
   const redBonus = bonus.filter(a => a.resultado === "red").length;
   const isLucroPos = bancaAtual >= BANCA_INICIAL;
-  const listaSimples = [...simplesOrdenadas].reverse();
+  const listaSimples = [...todasOrdenadas].reverse();
   const listaBonus = [...bonus].reverse();
 
   // ── Gerar Relatório ──
   async function gerarRelatorio() {
     setGerandoRelatorio(true); setTextoRelatorio(""); setModalRelatorio(true);
     const dadosParaAPI = {
-      dataInicio: simplesOrdenadas[0]?.data ?? null,
+      dataInicio: todasOrdenadas[0]?.data ?? null,
       dataAtual: new Date().toISOString().split("T")[0],
       bancaInicial: BANCA_INICIAL, bancaAtual,
       yieldPct: yieldPct.toFixed(2), roiUnidades: roiUnidades.toFixed(1),
