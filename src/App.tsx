@@ -8,7 +8,7 @@ import {
 // ── Types ──
 type Resultado = "pendente" | "green" | "red" | "void";
 type Tipo = "simples" | "bonus";
-type Aba = "resumo" | "pendentes" | "simples" | "duplas" | "triplas" | "combinadas" | "bonus" | "programacao";
+type Aba = "resumo" | "simples" | "duplas" | "triplas" | "combinadas" | "bonus" | "programacao";
 
 interface Detalhe {
   id: string; aposta_id: string; esporte: string; campeonato: string;
@@ -92,11 +92,6 @@ const LIGHT = {
 };
 
 export default function TipsterPainel() {
-  const [logado, setLogado] = useState(() => localStorage.getItem("sb_auth") === "ok");
-  const [menuLogin, setMenuLogin] = useState(false);
-  const [loginUser, setLoginUser] = useState("");
-  const [loginPass, setLoginPass] = useState("");
-  const [loginErro, setLoginErro] = useState("");
   const [apostas, setApostas] = useState<Aposta[]>([]);
   const [loading, setLoading] = useState(true);
   const [aba, setAba] = useState<Aba>("resumo");
@@ -111,25 +106,8 @@ export default function TipsterPainel() {
   const [editProgramacao, setEditProgramacao] = useState<Programacao | null>(null);
   const [formProg, setFormProg] = useState({ casa: CASAS[0], dia_semana: DIAS_SEMANA[0], valor: "", observacao: "" });
   const [dark, setDark] = useState(true);
+  const [menuOpen, setMenuOpen] = useState(false);
   const bancaMomentoRef = useRef<Record<string, number>>({});
-
-  function fazerLogin() {
-    if (loginUser === "edsondrews" && loginPass === "stake2026") {
-      localStorage.setItem("sb_auth", "ok");
-      setLogado(true);
-      setMenuLogin(false);
-      setLoginErro("");
-    } else {
-      setLoginErro("Login ou senha inválidos");
-    }
-  }
-
-  function fazerLogout() {
-    localStorage.removeItem("sb_auth");
-    setLogado(false);
-    setMenuLogin(false);
-  }
-
   const T = dark ? DARK : LIGHT;
 
   async function carregar() {
@@ -174,26 +152,19 @@ export default function TipsterPainel() {
   async function excluirProgramacao(id: string) {
     await supabase.from("tipster_programacao").delete().eq("id", id); carregar();
   }
-  async function excluirAposta(id: string) {
-    await supabase.from("tipster_apostas_detalhes").delete().eq("aposta_id", id);
-    await supabase.from("tipster_apostas").delete().eq("id", id);
-    setExpandido(null); carregar();
-  }
 
   // ── Derived data ──
   const simples = apostas.filter(a => a.tipo === "simples");
   const bonus = apostas.filter(a => a.tipo === "bonus");
-  const pendentes = apostas.filter(a => a.resultado === "pendente" && a.tipo !== "bonus");
   const simplesUm = simples.filter(a => (a.detalhes?.length ?? 0) <= 1);
   const simplesDupla = simples.filter(a => (a.detalhes?.length ?? 0) === 2);
   const simplesTripla = simples.filter(a => (a.detalhes?.length ?? 0) === 3);
   const simplesCombinada = simples.filter(a => (a.detalhes?.length ?? 0) >= 4);
 
   const simplesOrdenadas = [...simples].sort((a, b) => a.data.localeCompare(b.data) || a.created_at.localeCompare(b.created_at));
-  const todasOrdenadas = [...apostas].sort((a, b) => a.data.localeCompare(b.data) || a.created_at.localeCompare(b.created_at));
   const bancaMomentoCalc: Record<string, number> = {};
   let bancaAcum = BANCA_INICIAL;
-  for (const a of todasOrdenadas) {
+  for (const a of simplesOrdenadas) {
     bancaMomentoCalc[a.id] = bancaAcum;
     if (a.resultado !== "pendente" && a.resultado !== "void") {
       bancaAcum = parseFloat((bancaAcum + calcularLucro(a, bancaAcum)).toFixed(2));
@@ -204,12 +175,12 @@ export default function TipsterPainel() {
 
   function lucroCalc(a: Aposta) { return calcularLucro(a, bancaMomentoCalc[a.id]); }
 
-  const resolvidas = apostas.filter(a => a.resultado !== "pendente" && a.resultado !== "void");
   const resolvidasSimples = simples.filter(a => a.resultado !== "pendente" && a.resultado !== "void");
-  const greens = resolvidas.filter(a => a.resultado === "green");
-  const reds = resolvidas.filter(a => a.resultado === "red");
-  const taxaAcerto = resolvidas.length > 0 ? (greens.length / resolvidas.length * 100) : 0;
-  const lucroTotal = resolvidas.reduce((s, a) => s + lucroCalc(a), 0);
+  const greens = resolvidasSimples.filter(a => a.resultado === "green");
+  const reds = resolvidasSimples.filter(a => a.resultado === "red");
+  const pendentes = apostas.filter(a => a.resultado === "pendente");
+  const taxaAcerto = resolvidasSimples.length > 0 ? (greens.length / resolvidasSimples.length * 100) : 0;
+  const lucroSimples = resolvidasSimples.reduce((s, a) => s + lucroCalc(a), 0);
   const yieldPct = ((bancaAtual - BANCA_INICIAL) / BANCA_INICIAL * 100);
   const oddMedia = simples.length > 0 ? simples.reduce((s, a) => s + a.odd_total, 0) / simples.length : 0;
   const unidadesInvestidas = resolvidasSimples.reduce((s, a) => s + (a.stake_unidades ?? 0), 0);
@@ -248,13 +219,12 @@ export default function TipsterPainel() {
   const topCasas = Object.entries(lucroPorCasa).sort((a, b) => b[1].lucro - a[1].lucro).slice(0, 4);
 
   const dadosGrafico = (() => {
-    if (todasOrdenadas.length === 0) return [];
-    const resolvidas = apostas.filter(a => a.resultado !== "pendente" && a.resultado !== "void");
+    if (simplesOrdenadas.length === 0) return [];
     const porData: Record<string, number> = {};
-    resolvidas.forEach(a => { porData[a.data] = (porData[a.data] ?? 0) + lucroCalc(a); });
+    resolvidasSimples.forEach(a => { porData[a.data] = (porData[a.data] ?? 0) + lucroCalc(a); });
     const resultado: { data: string; banca: number }[] = [];
     let acum = BANCA_INICIAL;
-    resultado.push({ data: fmtDataCurta(todasOrdenadas[0].data), banca: acum });
+    resultado.push({ data: fmtDataCurta(simplesOrdenadas[0].data), banca: acum });
     for (const d of Object.keys(porData).sort()) {
       acum = parseFloat((acum + porData[d]).toFixed(2));
       resultado.push({ data: fmtDataCurta(d), banca: acum });
@@ -291,7 +261,7 @@ export default function TipsterPainel() {
         acerto: d.count > 0 ? ((d.greens / d.count) * 100).toFixed(1) : "0"
       })),
     };
-    const prompt = `Você é um analista especializado em apostas esportivas. Gere um relatório narrativo profissional em português brasileiro sobre o desempenho do tipster Master com base nos dados abaixo.\n\nDADOS:\n${JSON.stringify(dadosParaAPI, null, 2)}\n\nESTRUTURA:\nINÍCIO DO ACOMPANHAMENTO: Quando foi iniciado, banca inicial, período coberto.\nDESEMPENHO GERAL: Total de apostas, taxa de acerto, yield%, ROI, lucro na banca.\nGESTÃO DE RISCO: Drawdown máximo, sequência atual, melhor sequência.\nBÔNUS CAPTURADOS: Quantos tentados, convertidos vs perdidos, valor capturado. Explique quando houver picos na banca por conta de bonus convertidos (BOOM na banca).\nPERFORMANCE POR CASA: Qual casa performou melhor.\nCONCLUSÃO: Avaliação geral.\n\nREGRAS: Sem asteriscos, sem markdown, texto corrido com parágrafos. Cada bloco começa com título em MAIÚSCULAS seguido de dois pontos. Tom profissional mas acessível.`;
+    const prompt = `Você é um analista especializado em apostas esportivas. Gere um relatório narrativo profissional em português brasileiro sobre o desempenho do tipster Master com base nos dados abaixo.\n\nDADOS:\n${JSON.stringify(dadosParaAPI, null, 2)}\n\nESTRUTURA:\nINÍCIO DO ACOMPANHAMENTO: Quando foi iniciado, banca inicial, período coberto.\nDESEMPENHO GERAL: Total de apostas, taxa de acerto, yield%, ROI, lucro na banca.\nGESTÃO DE RISCO: Drawdown máximo, sequência atual, melhor sequência.\nBÔNUS CAPTURADOS: Quantos tentados, convertidos vs perdidos, valor capturado.\nPERFORMANCE POR CASA: Qual casa performou melhor.\nCONCLUSÃO: Avaliação geral.\n\nREGRAS: Sem asteriscos, sem markdown, texto corrido com parágrafos. Cada bloco começa com título em MAIÚSCULAS seguido de dois pontos. Tom profissional mas acessível.`;
     try {
       const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
       if (!apiKey) { setTextoRelatorio("Chave Gemini não configurada no .env"); setGerandoRelatorio(false); return; }
@@ -315,13 +285,6 @@ export default function TipsterPainel() {
     ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: ${T.bg}; } ::-webkit-scrollbar-thumb { background: ${T.border}; border-radius: 3px; }
     select, input { background: ${T.bgCard}; color: ${T.text}; border: 1px solid ${T.border}; border-radius: 10px; padding: 10px 12px; font-size: 14px; outline: none; width: 100%; }
     select:focus, input:focus { border-color: ${T.blue}; }
-    .legs-grid { display: grid; gap: 8px; margin-bottom: 14px; }
-    .legs-2 { grid-template-columns: 1fr 1fr; }
-    .legs-3 { grid-template-columns: 1fr 1fr 1fr; }
-    .legs-4 { grid-template-columns: 1fr 1fr; }
-    .leg-card { padding: 8px 12px; border-radius: 10px; background: ${T.bg}; border: 1px solid ${T.border}; position: relative; text-align: center; }
-    .leg-card .odd-top { position: absolute; top: 6px; right: 10px; font-size: 13px; font-family: monospace; font-weight: 800; color: ${T.blue}; }
-    @media (max-width: 600px) { .legs-grid { grid-template-columns: 1fr !important; } }
   `;
 
   if (loading) return (
@@ -336,7 +299,6 @@ export default function TipsterPainel() {
 
   const abasMapa: { key: Aba; label: string; count?: number }[] = [
     { key:"resumo", label:"Resumo" },
-    { key:"pendentes", label:"Pendentes", count:pendentes.length },
     { key:"simples", label:"Simples", count:simplesUm.length },
     { key:"duplas", label:"Duplas", count:simplesDupla.length },
     { key:"triplas", label:"Triplas", count:simplesTripla.length },
@@ -365,32 +327,6 @@ export default function TipsterPainel() {
               <button onClick={() => setDark(!dark)} style={{ width:36, height:36, borderRadius:8, border:`1px solid ${T.border}`, background:"transparent", color:T.muted, cursor:"pointer", fontSize:16, display:"flex", alignItems:"center", justifyContent:"center" }}>
                 {dark ? "☀️" : "🌙"}
               </button>
-              <div style={{ position:"relative" }}>
-                <button onClick={() => setMenuLogin(!menuLogin)} style={{ padding:"6px 14px", borderRadius:8, border:`1px solid ${T.border}`, background: logado ? T.green+"20" : "transparent", color: logado ? T.green : T.muted, fontSize:12, fontWeight:600, cursor:"pointer" }}>
-                  {logado ? "● Admin" : "🔑 Login"}
-                </button>
-                {menuLogin && (
-                  <div style={{ position:"absolute", right:0, top:44, background:T.bgCard, border:`1px solid ${T.border}`, borderRadius:12, padding:16, width:260, zIndex:100, boxShadow:"0 8px 32px rgba(0,0,0,0.4)" }}>
-                    {logado ? (
-                      <div>
-                        <p style={{ color:T.text, fontSize:13, marginBottom:12 }}>Logado como <b>Admin</b></p>
-                        <button onClick={fazerLogout} style={{ width:"100%", padding:10, borderRadius:8, border:`1px solid ${T.red}`, background:"transparent", color:T.red, fontSize:13, fontWeight:600, cursor:"pointer" }}>Sair</button>
-                      </div>
-                    ) : (
-                      <div>
-                        <p style={{ color:T.text, fontSize:13, marginBottom:12, fontWeight:600 }}>Login Admin</p>
-                        <input placeholder="Usuário" value={loginUser} onChange={e => setLoginUser(e.target.value)}
-                          style={{ width:"100%", padding:"10px 12px", borderRadius:8, border:`1px solid ${T.border}`, background:T.bg, color:T.text, fontSize:13, marginBottom:8, outline:"none", boxSizing:"border-box" }} />
-                        <input placeholder="Senha" type="password" value={loginPass} onChange={e => setLoginPass(e.target.value)}
-                          onKeyDown={e => e.key === "Enter" && fazerLogin()}
-                          style={{ width:"100%", padding:"10px 12px", borderRadius:8, border:`1px solid ${T.border}`, background:T.bg, color:T.text, fontSize:13, marginBottom:10, outline:"none", boxSizing:"border-box" }} />
-                        {loginErro && <p style={{ color:T.red, fontSize:12, marginBottom:8 }}>{loginErro}</p>}
-                        <button onClick={fazerLogin} style={{ width:"100%", padding:10, borderRadius:8, border:"none", background:T.blue, color:"white", fontSize:13, fontWeight:600, cursor:"pointer" }}>Entrar</button>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
             </div>
           </div>
         </nav>
@@ -448,7 +384,7 @@ export default function TipsterPainel() {
             {[
               { label:"Apostas", valor:String(apostas.length), sub:`${greens.length}G · ${reds.length}R · ${pendentes.length}P`, cor:T.text },
               { label:"Acerto", valor:`${taxaAcerto.toFixed(1)}%`, sub:`${resolvidasSimples.length} resolvidas`, cor: taxaAcerto>=55 ? T.green : taxaAcerto>0 ? T.red : T.text },
-              { label:"Yield", valor:`${yieldPct>=0?"+":""}${yieldPct.toFixed(1)}%`, sub:fmtBRL(lucroTotal), cor: lucroTotal>=0 ? T.green : T.red },
+              { label:"Yield", valor:`${yieldPct>=0?"+":""}${yieldPct.toFixed(1)}%`, sub:fmtBRL(lucroSimples), cor: lucroSimples>=0 ? T.green : T.red },
               { label:"Odd média", valor:oddMedia.toFixed(2), sub:"apostas simples", cor:T.text },
               { label:"Melhor seq.", valor:`${melhorSeq}G`, sub:"greens seguidos", cor: melhorSeq>=5 ? T.amber : T.text },
               { label:"Drawdown", valor:`${maxDrawdown.toFixed(1)}%`, sub:"queda máxima", cor: maxDrawdown>10 ? T.red : T.text },
@@ -501,7 +437,7 @@ export default function TipsterPainel() {
                       <XAxis dataKey="data" tick={{ fontSize:10, fill:T.muted }} axisLine={false} tickLine={false} />
                       <YAxis tick={{ fontSize:10, fill:T.muted }} tickFormatter={v=>`R$${v}`} domain={["auto","auto"]} axisLine={false} tickLine={false} width={72} />
                       <ReferenceLine y={BANCA_INICIAL} stroke={T.subtle} strokeDasharray="4 4" />
-                      <Tooltip formatter={(v) => [fmtBRL(Number(v)),"Banca"]} contentStyle={{ background:T.bgCard, border:`1px solid ${T.border}`, borderRadius:10, fontSize:12, color:T.text }} />
+                      <Tooltip formatter={(v:number) => [fmtBRL(v),"Banca"]} contentStyle={{ background:T.bgCard, border:`1px solid ${T.border}`, borderRadius:10, fontSize:12, color:T.text }} />
                       <Area type="monotone" dataKey="banca" stroke={isLucroPos ? T.green : T.red} strokeWidth={2.5} fill="url(#g1)" dot={false} activeDot={{ r:4, fill: isLucroPos ? T.green : T.red }} />
                     </AreaChart>
                   </ResponsiveContainer>
@@ -602,24 +538,6 @@ export default function TipsterPainel() {
             </div>
           )}
 
-          {/* ── ABA PENDENTES ── */}
-          {aba === "pendentes" && (
-            <div style={{ display:"flex", flexDirection:"column", gap:8, animation:"fadeIn 0.3s ease" }}>
-              {pendentes.length === 0 && (
-                <div style={{ textAlign:"center", padding:"60px 0", color:T.muted }}>
-                  <p style={{ fontSize:32, marginBottom:8 }}>✅</p>
-                  <p style={{ fontSize:14 }}>Nenhuma aposta pendente.</p>
-                </div>
-              )}
-              {[...pendentes].reverse().map(aposta => (
-                <CardAposta key={aposta.id} aposta={aposta} bancaMomentoCalc={bancaMomentoCalc}
-                  expandido={expandido} setExpandido={setExpandido}
-                  editando={editando} setEditando={setEditando}
-                  salvarResultado={salvarResultado} salvando={salvando} T={T} logado={logado} excluirAposta={excluirAposta} />
-              ))}
-            </div>
-          )}
-
           {/* ── ABAS DE BILHETES ── */}
           {(["simples","duplas","triplas","combinadas"] as Aba[]).includes(aba) && (() => {
             const mapa: Record<string, Aposta[]> = {
@@ -641,7 +559,7 @@ export default function TipsterPainel() {
                   <CardAposta key={aposta.id} aposta={aposta} bancaMomentoCalc={bancaMomentoCalc}
                     expandido={expandido} setExpandido={setExpandido}
                     editando={editando} setEditando={setEditando}
-                    salvarResultado={salvarResultado} salvando={salvando} T={T} logado={logado} excluirAposta={excluirAposta} />
+                    salvarResultado={salvarResultado} salvando={salvando} T={T} />
                 ))}
               </div>
             );
@@ -675,7 +593,7 @@ export default function TipsterPainel() {
                 <CardAposta key={aposta.id} aposta={aposta} bancaMomentoCalc={{}}
                   expandido={expandido} setExpandido={setExpandido}
                   editando={editando} setEditando={setEditando}
-                  salvarResultado={salvarResultado} salvando={salvando} T={T} logado={logado} excluirAposta={excluirAposta} />
+                  salvarResultado={salvarResultado} salvando={salvando} T={T} />
               ))}
             </div>
           )}
@@ -685,7 +603,7 @@ export default function TipsterPainel() {
             <div style={{ display:"flex", flexDirection:"column", gap:16, animation:"fadeIn 0.3s ease" }}>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
                 <p style={{ fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:1.5, color:T.muted }}>Programação semanal de bônus</p>
-                {logado && <button onClick={abrirNovaProgramacao} style={{ padding:"8px 16px", borderRadius:8, border:"none", background:T.blue, color:"white", fontSize:12, fontWeight:700, cursor:"pointer" }}>+ Nova</button>}
+                <button onClick={abrirNovaProgramacao} style={{ padding:"8px 16px", borderRadius:8, border:"none", background:T.blue, color:"white", fontSize:12, fontWeight:700, cursor:"pointer" }}>+ Nova</button>
               </div>
               <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:8 }}>
                 {DIAS_SEMANA.map(dia => {
@@ -695,10 +613,10 @@ export default function TipsterPainel() {
                       <p style={{ fontSize:10, fontWeight:700, textTransform:"uppercase", letterSpacing:1.5, color: itens.length>0 ? T.blue : T.muted, marginBottom:8 }}>{DIAS_LABEL[dia]}</p>
                       {itens.length === 0 && <p style={{ fontSize:11, color:T.subtle }}>—</p>}
                       {itens.map(p => (
-                        <div key={p.id} style={{ padding:"8px", borderRadius:8, marginBottom:6, background:T.bg, border:`1px solid ${T.border}`, cursor: logado ? "pointer" : "default" }} onClick={() => logado && abrirEditarProgramacao(p)}>
+                        <div key={p.id} style={{ padding:"8px", borderRadius:8, marginBottom:6, background:T.bg, border:`1px solid ${T.border}`, cursor:"pointer" }} onClick={() => abrirEditarProgramacao(p)}>
                           <div style={{ display:"flex", justifyContent:"space-between" }}>
                             <span style={{ fontSize:11, fontWeight:700, color:T.text }}>{p.casa}</span>
-                            {logado && <span onClick={e => { e.stopPropagation(); excluirProgramacao(p.id); }} style={{ fontSize:10, color:T.red, cursor:"pointer", fontWeight:700 }}>✕</span>}
+                            <span onClick={e => { e.stopPropagation(); excluirProgramacao(p.id); }} style={{ fontSize:10, color:T.red, cursor:"pointer", fontWeight:700 }}>✕</span>
                           </div>
                           <p style={{ fontSize:13, fontWeight:800, color:T.green, marginTop:4 }}>{fmtBRL(p.valor)}</p>
                           {p.observacao && <p style={{ fontSize:10, color:T.muted, marginTop:2 }}>{p.observacao}</p>}
@@ -806,13 +724,12 @@ export default function TipsterPainel() {
 }
 
 // ── Card de aposta ──
-function CardAposta({ aposta, bancaMomentoCalc, expandido, setExpandido, editando, setEditando, salvarResultado, salvando, T, logado, excluirAposta }: {
+function CardAposta({ aposta, bancaMomentoCalc, expandido, setExpandido, editando, setEditando, salvarResultado, salvando, T }: {
   aposta: Aposta; bancaMomentoCalc?: Record<string, number>;
   expandido: string | null; setExpandido: (id: string | null) => void;
   editando: { id: string; resultado: Resultado } | null;
   setEditando: (v: { id: string; resultado: Resultado } | null) => void;
-  salvarResultado: () => void; salvando: boolean; T: typeof DARK; logado: boolean;
-  excluirAposta: (id: string) => void;
+  salvarResultado: () => void; salvando: boolean; T: typeof DARK;
 }) {
   const lucro = calcularLucro(aposta, bancaMomentoCalc?.[aposta.id]);
   const isExp = expandido === aposta.id;
@@ -903,20 +820,22 @@ function CardAposta({ aposta, bancaMomentoCalc, expandido, setExpandido, editand
 
           {/* Legs */}
           {(aposta.detalhes ?? []).length > 0 && (
-            <div className={`legs-grid ${nLegs === 2 ? "legs-2" : nLegs === 3 ? "legs-3" : "legs-4"}`}>
+            <div style={{ display:"flex", flexDirection:"column", gap:6, marginBottom:14 }}>
               {aposta.detalhes!.map((d, i) => (
-                <div key={d.id} className="leg-card">
-                  <span className="odd-top">@{d.odd_parcial}</span>
-                  {nLegs > 1 && (
-                    <span style={{ fontSize:10, fontWeight:700, color:T.muted, display:"block", marginBottom:3, textTransform:"uppercase", letterSpacing:1 }}>
-                      Leg {i+1} · {d.esporte}
-                    </span>
-                  )}
-                  <p style={{ fontSize:12, fontWeight:600, color:T.text, marginBottom:2 }}>{d.jogo}</p>
-                  <p style={{ fontSize:10, color:T.muted, marginBottom:3 }}>{d.campeonato}</p>
-                  <p style={{ fontSize:11, color:T.muted }}>
-                    {d.mercado}: <span style={{ color:T.blue, fontWeight:700 }}>{d.selecao}</span>
-                  </p>
+                <div key={d.id} style={{ display:"flex", justifyContent:"space-between", gap:12, padding:"11px 14px", borderRadius:10, background:T.bg, border:`1px solid ${T.border}` }}>
+                  <div style={{ flex:1 }}>
+                    {nLegs > 1 && (
+                      <span style={{ fontSize:10, fontWeight:700, color:T.muted, display:"block", marginBottom:3, textTransform:"uppercase", letterSpacing:1 }}>
+                        Leg {i+1} · {d.esporte}
+                      </span>
+                    )}
+                    <p style={{ fontSize:13, fontWeight:600, color:T.text, marginBottom:2 }}>{d.jogo}</p>
+                    <p style={{ fontSize:11, color:T.muted, marginBottom:3 }}>{d.campeonato}</p>
+                    <p style={{ fontSize:12, color:T.muted }}>
+                      {d.mercado}: <span style={{ color:T.blue, fontWeight:700 }}>{d.selecao}</span>
+                    </p>
+                  </div>
+                  <span style={{ fontSize:15, fontFamily:"monospace", fontWeight:800, color:T.blue }}>@{d.odd_parcial}</span>
                 </div>
               ))}
             </div>
@@ -941,16 +860,9 @@ function CardAposta({ aposta, bancaMomentoCalc, expandido, setExpandido, editand
                 </button>
               </>
             ) : (
-              logado && (
-                <div style={{ display:"flex", gap:6 }}>
-                  <button onClick={() => setEditando({ id:aposta.id, resultado:aposta.resultado })} style={{ padding:"7px 14px", borderRadius:8, border:"none", cursor:"pointer", background:T.blue, color:"white", fontSize:12, fontWeight:700 }}>
-                    Editar
-                  </button>
-                  <button onClick={() => { if(confirm("Excluir esta aposta?")) excluirAposta(aposta.id); }} style={{ padding:"7px 14px", borderRadius:8, border:"none", cursor:"pointer", background:T.red, color:"white", fontSize:12, fontWeight:700 }}>
-                    Excluir
-                  </button>
-                </div>
-              )
+              <button onClick={() => setEditando({ id:aposta.id, resultado:aposta.resultado })} style={{ padding:"7px 14px", borderRadius:8, border:"none", cursor:"pointer", background:T.blue, color:"white", fontSize:12, fontWeight:700 }}>
+                Editar
+              </button>
             )}
           </div>
         </div>
