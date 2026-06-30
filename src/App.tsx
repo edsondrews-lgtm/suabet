@@ -445,7 +445,7 @@ export default function TipsterPainel() {
               {isAdmin && <button onClick={exportarBackup} style={{ padding:"6px 14px", borderRadius:8, border:"none", background:T.amber, color:"#000", fontSize:12, fontWeight:700, cursor:"pointer" }}>💾 Backup</button>}
               {isAdmin && telegramMsgs.filter(m => m.status === "pendente").length > 0 && (
                 <button onClick={() => { setAba("telegram"); }} style={{ position:"relative", padding:"6px 14px", borderRadius:8, border:"none", background:T.green, color:"white", fontSize:12, fontWeight:700, cursor:"pointer" }}>
-                  ✈️ Telegram
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="white" style={{marginRight:4, verticalAlign:"middle"}}><path d="M12 0C5.37 0 0 5.37 0 12s5.37 12 12 12 12-5.37 12-12S18.63 0 12 0zm5.95 7.47l-1.97 9.28c-.15.67-.54.83-1.09.52l-3.02-2.22-1.46 1.4c-.16.16-.3.3-.61.3l.22-3.06 5.56-5.02c.24-.22-.05-.33-.37-.14L8.68 13.3l-2.97-.93c-.65-.2-.66-.65.14-.96l11.6-4.47c.54-.2 1.01.13.83.96l-.16-.12z"/></svg> Telegram
                   <span style={{ position:"absolute", top:-6, right:-6, width:18, height:18, borderRadius:"50%", background:T.red, color:"white", fontSize:10, fontWeight:800, display:"flex", alignItems:"center", justifyContent:"center" }}>
                     {telegramMsgs.filter(m => m.status === "pendente").length}
                   </span>
@@ -875,7 +875,7 @@ export default function TipsterPainel() {
               <p style={{ fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:1.5, color:T.muted }}>Mensagens do Telegram</p>
               {telegramMsgs.length === 0 && (
                 <div style={{ textAlign:"center", padding:"60px 0", color:T.muted }}>
-                  <p style={{ fontSize:32, marginBottom:8 }}>✈️</p>
+                  <p style={{ fontSize:32, marginBottom:8 }}>📨</p>
                   <p style={{ fontSize:14 }}>Nenhuma mensagem recebida.</p>
                 </div>
               )}
