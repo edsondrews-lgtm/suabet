@@ -133,11 +133,14 @@ export default function TipsterPainel() {
     setIsAdmin(data?.role === "admin");
   }
 
+  const ADMIN_EMAIL_MAP: Record<string, string> = { "edsondrews": "edsondrews@hotmail.com" };
+
   async function fazerLogin() {
     setLoginLoading(true);
     setLoginErro("");
-    const { error } = await supabase.auth.signInWithPassword({ email: loginEmail, password: loginPass });
-    if (error) setLoginErro(error.message === "Invalid login credentials" ? "Email ou senha inválidos" : error.message);
+    const email = ADMIN_EMAIL_MAP[loginEmail.trim().toLowerCase()] ?? loginEmail;
+    const { error } = await supabase.auth.signInWithPassword({ email, password: loginPass });
+    if (error) setLoginErro(error.message === "Invalid login credentials" ? "Usuário ou senha inválidos" : error.message);
     else { setMenuLogin(false); setLoginEmail(""); setLoginPass(""); }
     setLoginLoading(false);
   }
@@ -384,7 +387,7 @@ export default function TipsterPainel() {
                     ) : (
                       <div>
                         <p style={{ color:T.text, fontSize:13, marginBottom:12, fontWeight:600 }}>Login Admin</p>
-                        <input placeholder="Email" value={loginEmail} onChange={e => setLoginEmail(e.target.value)}
+                        <input placeholder="Usuário" value={loginEmail} onChange={e => setLoginEmail(e.target.value)}
                           style={{ width:"100%", padding:"10px 12px", borderRadius:8, border:`1px solid ${T.border}`, background:T.bg, color:T.text, fontSize:13, marginBottom:8, outline:"none", boxSizing:"border-box" }} />
                         <input placeholder="Senha" type="password" value={loginPass} onChange={e => setLoginPass(e.target.value)}
                           onKeyDown={e => e.key === "Enter" && fazerLogin()}
