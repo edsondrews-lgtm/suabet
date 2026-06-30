@@ -92,11 +92,12 @@ const LIGHT = {
 };
 
 export default function TipsterPainel() {
-  const [logado, setLogado] = useState(() => localStorage.getItem("sb_auth") === "ok");
+  const [isAdmin, setIsAdmin] = useState(false);
   const [menuLogin, setMenuLogin] = useState(false);
-  const [loginUser, setLoginUser] = useState("");
+  const [loginEmail, setLoginEmail] = useState("");
   const [loginPass, setLoginPass] = useState("");
   const [loginErro, setLoginErro] = useState("");
+  const [loginLoading, setLoginLoading] = useState(false);
   const [apostas, setApostas] = useState<Aposta[]>([]);
   const [loading, setLoading] = useState(true);
   const [aba, setAba] = useState<Aba>("resumo");
@@ -116,20 +117,34 @@ export default function TipsterPainel() {
   const bancaMomentoRef = useRef<Record<string, number>>({});
   const T = dark ? DARK : LIGHT;
 
-  function fazerLogin() {
-    if (loginUser === "edsondrews" && loginPass === "stake2026") {
-      localStorage.setItem("sb_auth", "ok");
-      setLogado(true);
-      setMenuLogin(false);
-      setLoginErro("");
-    } else {
-      setLoginErro("Login ou senha inválidos");
-    }
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) checkAdmin(session.user.id);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) checkAdmin(session.user.id);
+      else setIsAdmin(false);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  async function checkAdmin(userId: string) {
+    const { data } = await supabase.from("user_profiles").select("role").eq("id", userId).single();
+    setIsAdmin(data?.role === "admin");
   }
 
-  function fazerLogout() {
-    localStorage.removeItem("sb_auth");
-    setLogado(false);
+  async function fazerLogin() {
+    setLoginLoading(true);
+    setLoginErro("");
+    const { error } = await supabase.auth.signInWithPassword({ email: loginEmail, password: loginPass });
+    if (error) setLoginErro(error.message === "Invalid login credentials" ? "Email ou senha inválidos" : error.message);
+    else { setMenuLogin(false); setLoginEmail(""); setLoginPass(""); }
+    setLoginLoading(false);
+  }
+
+  async function fazerLogout() {
+    await supabase.auth.signOut();
+    setIsAdmin(false);
     setMenuLogin(false);
   }
 
@@ -356,12 +371,12 @@ export default function TipsterPainel() {
                 {dark ? "☀️" : "🌙"}
               </button>
               <div style={{ position:"relative" }}>
-                <button onClick={() => setMenuLogin(!menuLogin)} style={{ padding:"6px 14px", borderRadius:8, border:`1px solid ${T.border}`, background: logado ? T.green+"20" : "transparent", color: logado ? T.green : T.muted, fontSize:12, fontWeight:600, cursor:"pointer" }}>
-                  {logado ? "● Admin" : "🔑 Login"}
+                <button onClick={() => setMenuLogin(!menuLogin)} style={{ padding:"6px 14px", borderRadius:8, border:`1px solid ${T.border}`, background: isAdmin ? T.green+"20" : "transparent", color: isAdmin ? T.green : T.muted, fontSize:12, fontWeight:600, cursor:"pointer" }}>
+                  {isAdmin ? "● Admin" : "🔑 Login"}
                 </button>
                 {menuLogin && (
                   <div style={{ position:"absolute", right:0, top:44, background:T.bgCard, border:`1px solid ${T.border}`, borderRadius:12, padding:16, width:260, zIndex:100, boxShadow:"0 8px 32px rgba(0,0,0,0.4)" }}>
-                    {logado ? (
+                    {isAdmin ? (
                       <div>
                         <p style={{ color:T.text, fontSize:13, marginBottom:12 }}>Logado como <b>Admin</b></p>
                         <button onClick={fazerLogout} style={{ width:"100%", padding:10, borderRadius:8, border:`1px solid ${T.red}`, background:"transparent", color:T.red, fontSize:13, fontWeight:600, cursor:"pointer" }}>Sair</button>
@@ -369,13 +384,13 @@ export default function TipsterPainel() {
                     ) : (
                       <div>
                         <p style={{ color:T.text, fontSize:13, marginBottom:12, fontWeight:600 }}>Login Admin</p>
-                        <input placeholder="Usuário" value={loginUser} onChange={e => setLoginUser(e.target.value)}
+                        <input placeholder="Email" value={loginEmail} onChange={e => setLoginEmail(e.target.value)}
                           style={{ width:"100%", padding:"10px 12px", borderRadius:8, border:`1px solid ${T.border}`, background:T.bg, color:T.text, fontSize:13, marginBottom:8, outline:"none", boxSizing:"border-box" }} />
                         <input placeholder="Senha" type="password" value={loginPass} onChange={e => setLoginPass(e.target.value)}
                           onKeyDown={e => e.key === "Enter" && fazerLogin()}
                           style={{ width:"100%", padding:"10px 12px", borderRadius:8, border:`1px solid ${T.border}`, background:T.bg, color:T.text, fontSize:13, marginBottom:10, outline:"none", boxSizing:"border-box" }} />
                         {loginErro && <p style={{ color:T.red, fontSize:12, marginBottom:8 }}>{loginErro}</p>}
-                        <button onClick={fazerLogin} style={{ width:"100%", padding:10, borderRadius:8, border:"none", background:T.blue, color:"white", fontSize:13, fontWeight:600, cursor:"pointer" }}>Entrar</button>
+                        <button onClick={fazerLogin} disabled={loginLoading} style={{ width:"100%", padding:10, borderRadius:8, border:"none", background:T.blue, color:"white", fontSize:13, fontWeight:600, cursor: loginLoading ? "wait" : "pointer", opacity: loginLoading ? 0.6 : 1 }}>{loginLoading ? "Entrando..." : "Entrar"}</button>
                       </div>
                     )}
                   </div>
@@ -619,7 +634,7 @@ export default function TipsterPainel() {
                 <CardAposta key={aposta.id} aposta={aposta} bancaMomentoCalc={bancaMomentoCalc}
                   expandido={expandido} setExpandido={setExpandido}
                   editando={editando} setEditando={setEditando}
-                  salvarResultado={salvarResultado} salvando={salvando} T={T} logado={logado} />
+                  salvarResultado={salvarResultado} salvando={salvando} T={T} isAdmin={isAdmin} />
               ))}
             </div>
           )}
@@ -637,7 +652,7 @@ export default function TipsterPainel() {
                 <CardAposta key={aposta.id} aposta={aposta} bancaMomentoCalc={bancaMomentoCalc}
                   expandido={expandido} setExpandido={setExpandido}
                   editando={editando} setEditando={setEditando}
-                  salvarResultado={salvarResultado} salvando={salvando} T={T} logado={logado} />
+                  salvarResultado={salvarResultado} salvando={salvando} T={T} isAdmin={isAdmin} />
               ))}
             </div>
           )}
@@ -663,7 +678,7 @@ export default function TipsterPainel() {
                   <CardAposta key={aposta.id} aposta={aposta} bancaMomentoCalc={bancaMomentoCalc}
                     expandido={expandido} setExpandido={setExpandido}
                     editando={editando} setEditando={setEditando}
-                    salvarResultado={salvarResultado} salvando={salvando} T={T} logado={logado} />
+                    salvarResultado={salvarResultado} salvando={salvando} T={T} isAdmin={isAdmin} />
                 ))}
               </div>
             );
@@ -697,7 +712,7 @@ export default function TipsterPainel() {
                 <CardAposta key={aposta.id} aposta={aposta} bancaMomentoCalc={{}}
                   expandido={expandido} setExpandido={setExpandido}
                   editando={editando} setEditando={setEditando}
-                  salvarResultado={salvarResultado} salvando={salvando} T={T} logado={logado} />
+                  salvarResultado={salvarResultado} salvando={salvando} T={T} isAdmin={isAdmin} />
               ))}
             </div>
           )}
@@ -707,7 +722,7 @@ export default function TipsterPainel() {
             <div style={{ display:"flex", flexDirection:"column", gap:16, animation:"fadeIn 0.3s ease" }}>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
                 <p style={{ fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:1.5, color:T.muted }}>Programação semanal de bônus</p>
-                {logado && <button onClick={abrirNovaProgramacao} style={{ padding:"8px 16px", borderRadius:8, border:"none", background:T.blue, color:"white", fontSize:12, fontWeight:700, cursor:"pointer" }}>+ Nova</button>}
+                {isAdmin && <button onClick={abrirNovaProgramacao} style={{ padding:"8px 16px", borderRadius:8, border:"none", background:T.blue, color:"white", fontSize:12, fontWeight:700, cursor:"pointer" }}>+ Nova</button>}
               </div>
               <div className="prog-grid" style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:8 }}>
                 {DIAS_SEMANA.map(dia => {
@@ -717,10 +732,10 @@ export default function TipsterPainel() {
                       <p style={{ fontSize:10, fontWeight:700, textTransform:"uppercase", letterSpacing:1.5, color: itens.length>0 ? T.blue : T.muted, marginBottom:8 }}>{DIAS_LABEL[dia]}</p>
                       {itens.length === 0 && <p style={{ fontSize:11, color:T.subtle }}>—</p>}
                       {itens.map(p => (
-                        <div key={p.id} style={{ padding:"8px", borderRadius:8, marginBottom:6, background:T.bg, border:`1px solid ${T.border}`, cursor: logado ? "pointer" : "default" }} onClick={() => logado && abrirEditarProgramacao(p)}>
+                        <div key={p.id} style={{ padding:"8px", borderRadius:8, marginBottom:6, background:T.bg, border:`1px solid ${T.border}`, cursor: isAdmin ? "pointer" : "default" }} onClick={() => isAdmin && abrirEditarProgramacao(p)}>
                           <div style={{ display:"flex", justifyContent:"space-between" }}>
                             <span style={{ fontSize:11, fontWeight:700, color:T.text }}>{p.casa}</span>
-                            {logado && <span onClick={e => { e.stopPropagation(); excluirProgramacao(p.id); }} style={{ fontSize:10, color:T.red, cursor:"pointer", fontWeight:700 }}>✕</span>}
+                            {isAdmin && <span onClick={e => { e.stopPropagation(); excluirProgramacao(p.id); }} style={{ fontSize:10, color:T.red, cursor:"pointer", fontWeight:700 }}>✕</span>}
                           </div>
                           <p style={{ fontSize:13, fontWeight:800, color:T.green, marginTop:4 }}>{fmtBRL(p.valor)}</p>
                           {p.observacao && <p style={{ fontSize:10, color:T.muted, marginTop:2 }}>{p.observacao}</p>}
@@ -827,12 +842,12 @@ export default function TipsterPainel() {
 }
 
 // ── Card de aposta ──
-function CardAposta({ aposta, bancaMomentoCalc, expandido, setExpandido, editando, setEditando, salvarResultado, salvando, T, logado }: {
+function CardAposta({ aposta, bancaMomentoCalc, expandido, setExpandido, editando, setEditando, salvarResultado, salvando, T, isAdmin }: {
   aposta: Aposta; bancaMomentoCalc?: Record<string, number>;
   expandido: string | null; setExpandido: (id: string | null) => void;
   editando: { id: string; resultado: Resultado } | null;
   setEditando: (v: { id: string; resultado: Resultado } | null) => void;
-  salvarResultado: () => void; salvando: boolean; T: typeof DARK; logado: boolean;
+  salvarResultado: () => void; salvando: boolean; T: typeof DARK; isAdmin: boolean;
 }) {
   const lucro = calcularLucro(aposta, bancaMomentoCalc?.[aposta.id]);
   const isExp = expandido === aposta.id;
@@ -963,7 +978,7 @@ function CardAposta({ aposta, bancaMomentoCalc, expandido, setExpandido, editand
                 </button>
               </>
             ) : (
-              logado && <button onClick={() => setEditando({ id:aposta.id, resultado:aposta.resultado })} style={{ padding:"7px 14px", borderRadius:8, border:"none", cursor:"pointer", background:T.blue, color:"white", fontSize:12, fontWeight:700 }}>
+              isAdmin && <button onClick={() => setEditando({ id:aposta.id, resultado:aposta.resultado })} style={{ padding:"7px 14px", borderRadius:8, border:"none", cursor:"pointer", background:T.blue, color:"white", fontSize:12, fontWeight:700 }}>
                 Editar
               </button>
             )}
