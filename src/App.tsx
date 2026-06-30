@@ -111,6 +111,7 @@ export default function TipsterPainel() {
   const [editProgramacao, setEditProgramacao] = useState<Programacao | null>(null);
   const [formProg, setFormProg] = useState({ casa: CASAS[0], dia_semana: DIAS_SEMANA[0], valor: "", observacao: "" });
   const [dark, setDark] = useState(true);
+  const [incluirBonus, setIncluirBonus] = useState(true);
 
   const bancaMomentoRef = useRef<Record<string, number>>({});
   const T = dark ? DARK : LIGHT;
@@ -183,7 +184,8 @@ export default function TipsterPainel() {
   const simplesTripla = simples.filter(a => (a.detalhes?.length ?? 0) === 3);
   const simplesCombinada = simples.filter(a => (a.detalhes?.length ?? 0) >= 4);
 
-  const todasOrdenadas = [...apostas].sort((a, b) => a.data.localeCompare(b.data) || a.created_at.localeCompare(b.created_at));
+  const apostasFiltro = incluirBonus ? apostas : apostas.filter(a => a.tipo === "simples");
+  const todasOrdenadas = [...apostasFiltro].sort((a, b) => a.data.localeCompare(b.data) || a.created_at.localeCompare(b.created_at));
   const bancaMomentoCalc: Record<string, number> = {};
   let bancaAcum = BANCA_INICIAL;
   for (const a of todasOrdenadas) {
@@ -198,7 +200,7 @@ export default function TipsterPainel() {
   function lucroCalc(a: Aposta) { return calcularLucro(a, bancaMomentoCalc[a.id]); }
 
   const resolvidasSimples = simples.filter(a => a.resultado !== "pendente" && a.resultado !== "void");
-  const todasResolvidas = apostas.filter(a => a.resultado !== "pendente" && a.resultado !== "void");
+  const todasResolvidas = apostasFiltro.filter(a => a.resultado !== "pendente" && a.resultado !== "void");
   const greens = resolvidasSimples.filter(a => a.resultado === "green");
   const reds = resolvidasSimples.filter(a => a.resultado === "red");
   const pendentes = apostas.filter(a => a.resultado === "pendente");
@@ -398,7 +400,15 @@ export default function TipsterPainel() {
                 <p style={{ fontSize:11, fontWeight:700, letterSpacing:3, color:T.muted, textTransform:"uppercase", marginBottom:6 }}>
                   Tipster · banca base {fmtBRL(BANCA_INICIAL)}
                 </p>
-                <div style={{ display:"flex", flexWrap:"wrap", gap:8, marginBottom:8 }}>
+                <div style={{ display:"flex", flexWrap:"wrap", alignItems:"center", gap:6, marginBottom:8 }}>
+                  <button onClick={() => setIncluirBonus(!incluirBonus)} style={{
+                    padding:"5px 12px", borderRadius:100, fontSize:11, fontWeight:700, cursor:"pointer",
+                    border:`1px solid ${incluirBonus ? T.green+"60" : T.border}`,
+                    background: incluirBonus ? T.green+"18" : "transparent",
+                    color: incluirBonus ? T.green : T.muted,
+                  }}>
+                    {incluirBonus ? "✓ Com bônus" : "Sem bônus"}
+                  </button>
                   {sequencia >= 2 && (
                     <span style={{ fontSize:12, fontWeight:700, padding:"4px 12px", borderRadius:100, background: tipoSeq==="green" ? `${T.green}15` : `${T.red}15`, color: tipoSeq==="green" ? T.green : T.red, border:`1px solid ${tipoSeq==="green" ? T.green : T.red}40` }}>
                       🔥 {sequencia} {tipoSeq==="green" ? "greens" : "reds"} seguidos
