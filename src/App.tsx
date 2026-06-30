@@ -8,7 +8,7 @@ import {
 // ── Types ──
 type Resultado = "pendente" | "green" | "red" | "void";
 type Tipo = "simples" | "bonus";
-type Aba = "resumo" | "pendentes" | "simples" | "duplas" | "triplas" | "combinadas" | "bonus" | "programacao";
+type Aba = "resumo" | "todas" | "pendentes" | "simples" | "duplas" | "triplas" | "combinadas" | "bonus" | "programacao";
 
 interface Detalhe {
   id: string; aposta_id: string; esporte: string; campeonato: string;
@@ -325,6 +325,7 @@ export default function TipsterPainel() {
 
   const abasMapa: { key: Aba; label: string; count?: number }[] = [
     { key:"resumo", label:"Resumo" },
+    { key:"todas", label:"Todas", count:apostas.length },
     { key:"pendentes", label:"Pendentes", count:pendentes.length },
     { key:"simples", label:"Simples", count:simplesUm.length },
     { key:"duplas", label:"Duplas", count:simplesDupla.length },
@@ -602,6 +603,24 @@ export default function TipsterPainel() {
                   </div>
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* ── ABA TODAS ── */}
+          {aba === "todas" && (
+            <div style={{ display:"flex", flexDirection:"column", gap:8, animation:"fadeIn 0.3s ease" }}>
+              {apostas.length === 0 && (
+                <div style={{ textAlign:"center", padding:"60px 0", color:T.muted }}>
+                  <p style={{ fontSize:32, marginBottom:8 }}>📋</p>
+                  <p style={{ fontSize:14 }}>Nenhuma aposta registrada.</p>
+                </div>
+              )}
+              {[...apostas].sort((a, b) => b.data.localeCompare(a.data) || b.created_at.localeCompare(a.created_at)).map(aposta => (
+                <CardAposta key={aposta.id} aposta={aposta} bancaMomentoCalc={bancaMomentoCalc}
+                  expandido={expandido} setExpandido={setExpandido}
+                  editando={editando} setEditando={setEditando}
+                  salvarResultado={salvarResultado} salvando={salvando} T={T} logado={logado} />
+              ))}
             </div>
           )}
 
