@@ -28,7 +28,13 @@ interface Programacao {
 interface TelegramMessage {
   id: string; chat_id: number; nome: string;
   texto: string | null; foto_file_id: string | null;
-  status: string; created_at: string;
+  dados_extraidos: DadosBilhete | null;
+  status_extracao: string; status: string; created_at: string;
+}
+interface DadosBilhete {
+  data: string | null; casa_aposta: string | null; stake_unidades: number | null;
+  tipo: string; odd_total: number;
+  pernas: { esporte: string; campeonato: string; jogo: string; mercado: string; selecao: string; odd_parcial: number }[];
 }
 
 // ── Constants ──
@@ -122,6 +128,7 @@ export default function TipsterPainel() {
   const [modalTelegram, setModalTelegram] = useState(false);
   const [msgSelecionada, setMsgSelecionada] = useState<TelegramMessage | null>(null);
   const [editMsgTexto, setEditMsgTexto] = useState("");
+  const [editBilhete, setEditBilhete] = useState<DadosBilhete | null>(null);
 
   const bancaMomentoRef = useRef<Record<string, number>>({});
   const T = dark ? DARK : LIGHT;
@@ -183,20 +190,17 @@ export default function TipsterPainel() {
   function abrirConfirmacao(msg: TelegramMessage) {
     setMsgSelecionada(msg);
     setEditMsgTexto(msg.texto ?? "");
+    if (msg.dados_extraidos) {
+      setEditBilhete(JSON.parse(JSON.stringify(msg.dados_extraidos)));
+    } else {
+      setEditBilhete(null);
+    }
     setModalTelegram(true);
   }
 
   async function negarMsg() {
     if (!msgSelecionada) return;
     await supabase.from("telegram_messages").delete().eq("id", msgSelecionada.id);
-    setModalTelegram(false);
-    setMsgSelecionada(null);
-    carregarTelegram();
-  }
-
-  async function salvarMsg() {
-    if (!msgSelecionada) return;
-    await supabase.from("telegram_messages").update({ status: "confirmado" }).eq("id", msgSelecionada.id);
     setModalTelegram(false);
     setMsgSelecionada(null);
     carregarTelegram();
@@ -211,6 +215,35 @@ export default function TipsterPainel() {
     setModalTelegram(false);
     setMsgSelecionada(null);
     carregarTelegram();
+  }
+
+  async function cadastrarApostaDoTelegram() {
+    if (!editBilhete) return;
+    const { data: apostaInsert, error: err1 } = await supabase.from("tipster_apostas").insert({
+      data: editBilhete.data || new Date().toISOString().split("T")[0],
+      tipo: editBilhete.tipo === "multipla" ? "simples" : "simples",
+      stake_unidades: editBilhete.stake_unidades,
+      banca_momento: bancaAtual,
+      casa_aposta: editBilhete.casa_aposta || "",
+      odd_total: editBilhete.odd_total,
+      resultado: "pendente",
+      observacao: editMsgTexto || null,
+    }).select("id").single();
+
+    if (err1 || !apostaInsert) { console.error("Erro ao salvar aposta:", err1); return; }
+
+    const legs = (editBilhete.pernas || []).map(p => ({
+      aposta_id: apostaInsert.id, esporte: p.esporte || "", campeonato: p.campeonato || "",
+      jogo: p.jogo || "", mercado: p.mercado || "", selecao: p.selecao || "",
+      odd_parcial: p.odd_parcial || 0,
+    }));
+    if (legs.length > 0) await supabase.from("tipster_apostas_detalhes").insert(legs);
+
+    await supabase.from("telegram_messages").update({ status: "confirmado" }).eq("id", msgSelecionada!.id);
+    setModalTelegram(false);
+    setMsgSelecionada(null);
+    carregarTelegram();
+    carregar();
   }
 
   async function carregar() {
@@ -910,7 +943,7 @@ export default function TipsterPainel() {
               <h2 style={{ fontSize:17, fontWeight:800, color:T.text, marginBottom:6 }}>Confirmar mensagem</h2>
               <p style={{ fontSize:12, color:T.muted, marginBottom:16 }}>De: <b>{msgSelecionada.nome}</b> · {new Date(msgSelecionada.created_at).toLocaleString("pt-BR")}</p>
 
-              {msgSelecionada.foto_file_id && (
+              {msgSelecionada.foto_file_id && !editBilhete && (
                 <div style={{ padding:"12px 16px", borderRadius:10, background:T.bg, border:`1px solid ${T.border}`, marginBottom:12, textAlign:"center" }}>
                   <p style={{ fontSize:24, marginBottom:4 }}>📷</p>
                   <p style={{ fontSize:12, color:T.muted }}>Foto recebida</p>
@@ -918,21 +951,97 @@ export default function TipsterPainel() {
                 </div>
               )}
 
-              <div style={{ display:"flex", flexDirection:"column", gap:10, marginBottom:20 }}>
-                <div>
-                  <label style={{ fontSize:11, fontWeight:700, color:T.muted, textTransform:"uppercase", letterSpacing:1, display:"block", marginBottom:4 }}>Texto original</label>
-                  <div style={{ padding:"10px 12px", borderRadius:8, background:T.bg, border:`1px solid ${T.border}`, fontSize:13, color:T.text, minHeight:40 }}>{msgSelecionada.texto || "(sem texto)"}</div>
+              {editBilhete ? (
+                <div style={{ marginBottom:16 }}>
+                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:12 }}>
+                    <div>
+                      <label style={{ fontSize:11, fontWeight:700, color:T.muted, textTransform:"uppercase", letterSpacing:1, display:"block", marginBottom:4 }}>Data</label>
+                      <input type="date" value={editBilhete.data||""} onChange={e => setEditBilhete({...editBilhete, data:e.target.value||null})} style={{ width:"100%", padding:"8px 10px", borderRadius:8, border:`1px solid ${T.border}`, background:T.bg, color:T.text, fontSize:13, boxSizing:"border-box" }}/>
+                    </div>
+                    <div>
+                      <label style={{ fontSize:11, fontWeight:700, color:T.muted, textTransform:"uppercase", letterSpacing:1, display:"block", marginBottom:4 }}>Casa *</label>
+                      <input type="text" placeholder="Ex: 22BET" value={editBilhete.casa_aposta||""} onChange={e => setEditBilhete({...editBilhete, casa_aposta:e.target.value||null})} style={{ width:"100%", padding:"8px 10px", borderRadius:8, border:`2px solid ${!editBilhete.casa_aposta ? "#f97316" : T.border}`, background:T.bg, color:T.text, fontSize:13, boxSizing:"border-box" }}/>
+                    </div>
+                    <div>
+                      <label style={{ fontSize:11, fontWeight:700, color:T.muted, textTransform:"uppercase", letterSpacing:1, display:"block", marginBottom:4 }}>Stake (un) *</label>
+                      <input type="number" step="0.1" min="0" placeholder="Ex: 1.5" value={editBilhete.stake_unidades??""} onChange={e => setEditBilhete({...editBilhete, stake_unidades:e.target.value ? parseFloat(e.target.value) : null})} style={{ width:"100%", padding:"8px 10px", borderRadius:8, border:`2px solid ${editBilhete.stake_unidades==null ? "#f97316" : T.border}`, background:T.bg, color:T.text, fontSize:13, boxSizing:"border-box" }}/>
+                    </div>
+                    <div>
+                      <label style={{ fontSize:11, fontWeight:700, color:T.muted, textTransform:"uppercase", letterSpacing:1, display:"block", marginBottom:4 }}>Odd Total</label>
+                      <input type="number" step="0.01" min="0" value={editBilhete.odd_total} readOnly style={{ width:"100%", padding:"8px 10px", borderRadius:8, border:`1px solid ${T.border}`, background:T.bg, color:T.muted, fontSize:13, boxSizing:"border-box", opacity:0.7 }}/>
+                    </div>
+                  </div>
+
+                  <p style={{ fontSize:12, fontWeight:700, color:T.text, marginBottom:6 }}>
+                    Pernas ({editBilhete.pernas?.length ?? 0})
+                  </p>
+                  {editBilhete.pernas?.map((p, i) => (
+                    <div key={i} style={{ background:T.bg, borderRadius:10, padding:10, marginBottom:8, border:`1px solid ${T.border}` }}>
+                      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:6 }}>
+                        <div>
+                          <label style={{ fontSize:10, color:T.muted }}>Esporte</label>
+                          <input type="text" value={p.esporte} onChange={e => { const n=[...editBilhete.pernas]; n[i]={...n[i], esporte:e.target.value}; setEditBilhete({...editBilhete, pernas:n}); }} style={{ width:"100%", padding:"6px 8px", borderRadius:6, border:`1px solid ${T.border}`, background:T.bgCard, color:T.text, fontSize:12, boxSizing:"border-box" }}/>
+                        </div>
+                        <div>
+                          <label style={{ fontSize:10, color:T.muted }}>Campeonato</label>
+                          <input type="text" value={p.campeonato} onChange={e => { const n=[...editBilhete.pernas]; n[i]={...n[i], campeonato:e.target.value}; setEditBilhete({...editBilhete, pernas:n}); }} style={{ width:"100%", padding:"6px 8px", borderRadius:6, border:`1px solid ${T.border}`, background:T.bgCard, color:T.text, fontSize:12, boxSizing:"border-box" }}/>
+                        </div>
+                      </div>
+                      <div style={{ marginBottom:6 }}>
+                        <label style={{ fontSize:10, color:T.muted }}>Jogo</label>
+                        <input type="text" value={p.jogo} onChange={e => { const n=[...editBilhete.pernas]; n[i]={...n[i], jogo:e.target.value}; setEditBilhete({...editBilhete, pernas:n}); }} style={{ width:"100%", padding:"6px 8px", borderRadius:6, border:`1px solid ${T.border}`, background:T.bgCard, color:T.text, fontSize:12, boxSizing:"border-box" }}/>
+                      </div>
+                      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8 }}>
+                        <div>
+                          <label style={{ fontSize:10, color:T.muted }}>Mercado</label>
+                          <input type="text" value={p.mercado} onChange={e => { const n=[...editBilhete.pernas]; n[i]={...n[i], mercado:e.target.value}; setEditBilhete({...editBilhete, pernas:n}); }} style={{ width:"100%", padding:"6px 8px", borderRadius:6, border:`1px solid ${T.border}`, background:T.bgCard, color:T.text, fontSize:12, boxSizing:"border-box" }}/>
+                        </div>
+                        <div>
+                          <label style={{ fontSize:10, color:T.muted }}>Seleção</label>
+                          <input type="text" value={p.selecao} onChange={e => { const n=[...editBilhete.pernas]; n[i]={...n[i], selecao:e.target.value}; setEditBilhete({...editBilhete, pernas:n}); }} style={{ width:"100%", padding:"6px 8px", borderRadius:6, border:`1px solid ${T.border}`, background:T.bgCard, color:T.text, fontSize:12, boxSizing:"border-box" }}/>
+                        </div>
+                        <div>
+                          <label style={{ fontSize:10, color:T.muted }}>Odd</label>
+                          <input type="number" step="0.01" min="0" value={p.odd_parcial} onChange={e => { const n=[...editBilhete.pernas]; n[i]={...n[i], odd_parcial:parseFloat(e.target.value)||0}; setEditBilhete({...editBilhete, pernas:n}); }} style={{ width:"100%", padding:"6px 8px", borderRadius:6, border:`1px solid ${T.border}`, background:T.bgCard, color:T.text, fontSize:12, boxSizing:"border-box" }}/>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+
+                  {msgSelecionada.foto_file_id && (
+                    <a href={`https://api.telegram.org/file/bot${import.meta.env.VITE_TELEGRAM_BOT_TOKEN||""}/${msgSelecionada.foto_file_id}`}
+                      target="_blank" rel="noopener noreferrer"
+                      style={{ display:"block", textAlign:"center", fontSize:12, color:T.blue, marginBottom:12, textDecoration:"underline", cursor:"pointer" }}>
+                      Ver imagem original
+                    </a>
+                  )}
+
+                  <div style={{ marginBottom:12 }}>
+                    <label style={{ fontSize:11, fontWeight:700, color:T.muted, textTransform:"uppercase", letterSpacing:1, display:"block", marginBottom:4 }}>Observação</label>
+                    <input value={editMsgTexto} onChange={e => setEditMsgTexto(e.target.value)} placeholder="Observação (opcional)..." />
+                  </div>
                 </div>
-                <div>
-                  <label style={{ fontSize:11, fontWeight:700, color:T.muted, textTransform:"uppercase", letterSpacing:1, display:"block", marginBottom:4 }}>Editar texto</label>
-                  <input value={editMsgTexto} onChange={e => setEditMsgTexto(e.target.value)} placeholder="Edite o texto antes de salvar..." />
-                </div>
-              </div>
+              ) : (
+                <>
+                  <div style={{ display:"flex", flexDirection:"column", gap:10, marginBottom:20 }}>
+                    <div>
+                      <label style={{ fontSize:11, fontWeight:700, color:T.muted, textTransform:"uppercase", letterSpacing:1, display:"block", marginBottom:4 }}>Texto original</label>
+                      <div style={{ padding:"10px 12px", borderRadius:8, background:T.bg, border:`1px solid ${T.border}`, fontSize:13, color:T.text, minHeight:40 }}>{msgSelecionada.texto || "(sem texto)"}</div>
+                    </div>
+                    <div>
+                      <label style={{ fontSize:11, fontWeight:700, color:T.muted, textTransform:"uppercase", letterSpacing:1, display:"block", marginBottom:4 }}>Editar texto</label>
+                      <input value={editMsgTexto} onChange={e => setEditMsgTexto(e.target.value)} placeholder="Edite o texto antes de salvar..." />
+                    </div>
+                  </div>
+                </>
+              )}
 
               <div style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
                 <button onClick={negarMsg} style={{ padding:"10px 20px", borderRadius:10, border:`1px solid ${T.red}`, background:"transparent", color:T.red, fontSize:13, fontWeight:700, cursor:"pointer" }}>✕ Negar</button>
-                <button onClick={salvarMsg} style={{ padding:"10px 20px", borderRadius:10, border:"none", background:T.green, color:"white", fontSize:13, fontWeight:700, cursor:"pointer" }}>✓ Salvar</button>
-                <button onClick={salvarEditado} style={{ padding:"10px 20px", borderRadius:10, border:"none", background:T.blue, color:"white", fontSize:13, fontWeight:700, cursor:"pointer" }}>✎ Editar</button>
+                <button onClick={salvarEditado} style={{ padding:"10px 20px", borderRadius:10, border:"none", background:T.green, color:"white", fontSize:13, fontWeight:700, cursor:"pointer" }}>✓ Salvar</button>
+                {editBilhete && (
+                  <button onClick={cadastrarApostaDoTelegram} style={{ padding:"10px 20px", borderRadius:10, border:"none", background:T.blue, color:"white", fontSize:13, fontWeight:700, cursor:"pointer" }}>✎ Cadastrar</button>
+                )}
               </div>
             </div>
           </div>
