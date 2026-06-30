@@ -416,6 +416,20 @@ export default function TipsterPainel() {
               </div>
 
               <div style={{ textAlign:"right" }}>
+                <div style={{ display:"inline-flex", background:T.bg, border:`1px solid ${T.border}`, borderRadius:8, padding:3, marginBottom:8 }}>
+                  <button onClick={() => setIncluirBonus(true)} style={{
+                    padding:"5px 14px", borderRadius:6, fontSize:11, fontWeight:700, cursor:"pointer", border:"none",
+                    background: incluirBonus ? T.green : "transparent",
+                    color: incluirBonus ? "#fff" : T.muted,
+                    transition:"all 0.2s",
+                  }}>Com bônus</button>
+                  <button onClick={() => setIncluirBonus(false)} style={{
+                    padding:"5px 14px", borderRadius:6, fontSize:11, fontWeight:700, cursor:"pointer", border:"none",
+                    background: !incluirBonus ? T.blue : "transparent",
+                    color: !incluirBonus ? "#fff" : T.muted,
+                    transition:"all 0.2s",
+                  }}>Sem bônus</button>
+                </div>
                 <p style={{ fontSize:11, color:T.muted, textTransform:"uppercase", letterSpacing:2, marginBottom:4 }}>Banca atual</p>
                 <p style={{ fontSize:36, fontWeight:900, color: isLucroPos ? T.green : T.red, letterSpacing:-1, lineHeight:1 }}>
                   {fmtBRL(bancaAtual)}
@@ -429,24 +443,6 @@ export default function TipsterPainel() {
                   </span>
                 </div>
               </div>
-            </div>
-          </div>
-
-          {/* ── TOGGLE BANCA ── */}
-          <div style={{ display:"flex", justifyContent:"center", marginBottom:16 }}>
-            <div style={{ display:"inline-flex", background:T.bgCard, border:`1px solid ${T.border}`, borderRadius:12, padding:4 }}>
-              <button onClick={() => setIncluirBonus(true)} style={{
-                padding:"8px 20px", borderRadius:9, fontSize:13, fontWeight:700, cursor:"pointer", border:"none",
-                background: incluirBonus ? T.green : "transparent",
-                color: incluirBonus ? "#fff" : T.muted,
-                transition:"all 0.2s",
-              }}>Com bônus</button>
-              <button onClick={() => setIncluirBonus(false)} style={{
-                padding:"8px 20px", borderRadius:9, fontSize:13, fontWeight:700, cursor:"pointer", border:"none",
-                background: !incluirBonus ? T.blue : "transparent",
-                color: !incluirBonus ? "#fff" : T.muted,
-                transition:"all 0.2s",
-              }}>Sem bônus</button>
             </div>
           </div>
 
