@@ -184,7 +184,7 @@ export default function TipsterPainel() {
   }
 
   async function carregarTelegram() {
-    const { data } = await supabase.from("telegram_messages").select("*").order("created_at", { ascending: false });
+    const { data } = await supabase.from("telegram_messages").select("*").eq("status", "pendente").order("created_at", { ascending: false });
     setTelegramMsgs((data ?? []) as TelegramMessage[]);
   }
 
