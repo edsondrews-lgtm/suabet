@@ -811,8 +811,8 @@ export default function TipsterPainel() {
           .hero-row { flex-direction: column !important; }
           .hero-row > div:last-child { text-align: left !important; }
           .metrics-grid { grid-template-columns: repeat(2, 1fr) !important; }
-          .stats-row { grid-template-columns: 1fr !important; }
-          .bonus-row { grid-template-columns: 1fr !important; }
+          .stats-row { display: flex !important; flex-direction: column !important; gap: 12px !important; }
+          .bonus-row { display: flex !important; flex-direction: column !important; gap: 12px !important; }
           .bonus-stats-grid { grid-template-columns: repeat(2, 1fr) !important; }
           .prog-grid { grid-template-columns: repeat(3, 1fr) !important; }
         }
