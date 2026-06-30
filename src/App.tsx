@@ -202,7 +202,7 @@ export default function TipsterPainel() {
 
   async function negarMsg() {
     if (!msgSelecionada) return;
-    await supabase.from("telegram_messages").update({ status: "negado" }).eq("id", msgSelecionada.id);
+    await supabase.from("telegram_messages").delete().eq("id", msgSelecionada.id);
     setModalTelegram(false);
     setMsgSelecionada(null);
     carregarTelegram();
@@ -235,7 +235,7 @@ export default function TipsterPainel() {
         odd_parcial: p.odd_parcial || 0,
       }));
       if (legs.length > 0) await supabase.from("tipster_apostas_detalhes").insert(legs);
-      await supabase.from("telegram_messages").update({ status: "confirmado" }).eq("id", msgSelecionada.id);
+      await supabase.from("telegram_messages").delete().eq("id", msgSelecionada.id);
       carregar();
     } else {
       await supabase.from("telegram_messages").update({
