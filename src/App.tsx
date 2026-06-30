@@ -8,7 +8,7 @@ import {
 // ── Types ──
 type Resultado = "pendente" | "green" | "red" | "void";
 type Tipo = "simples" | "bonus";
-type Aba = "resumo" | "todas" | "pendentes" | "simples" | "duplas" | "triplas" | "combinadas" | "bonus" | "programacao";
+type Aba = "resumo" | "todas" | "pendentes" | "simples" | "duplas" | "triplas" | "combinadas" | "bonus" | "programacao" | "telegram";
 
 interface Detalhe {
   id: string; aposta_id: string; esporte: string; campeonato: string;
@@ -24,6 +24,11 @@ interface Aposta {
 interface Programacao {
   id: string; casa: string; dia_semana: string; valor: number;
   observacao: string | null; created_at: string;
+}
+interface TelegramMessage {
+  id: string; chat_id: number; nome: string;
+  texto: string | null; foto_file_id: string | null;
+  status: string; created_at: string;
 }
 
 // ── Constants ──
@@ -113,6 +118,10 @@ export default function TipsterPainel() {
   const [formProg, setFormProg] = useState({ casa: CASAS[0], dia_semana: DIAS_SEMANA[0], valor: "", observacao: "" });
   const [dark, setDark] = useState(true);
   const [incluirBonus, setIncluirBonus] = useState(true);
+  const [telegramMsgs, setTelegramMsgs] = useState<TelegramMessage[]>([]);
+  const [modalTelegram, setModalTelegram] = useState(false);
+  const [msgSelecionada, setMsgSelecionada] = useState<TelegramMessage | null>(null);
+  const [editMsgTexto, setEditMsgTexto] = useState("");
 
   const bancaMomentoRef = useRef<Record<string, number>>({});
   const T = dark ? DARK : LIGHT;
@@ -166,6 +175,44 @@ export default function TipsterPainel() {
     setMenuLogin(false);
   }
 
+  async function carregarTelegram() {
+    const { data } = await supabase.from("telegram_messages").select("*").order("created_at", { ascending: false });
+    setTelegramMsgs((data ?? []) as TelegramMessage[]);
+  }
+
+  function abrirConfirmacao(msg: TelegramMessage) {
+    setMsgSelecionada(msg);
+    setEditMsgTexto(msg.texto ?? "");
+    setModalTelegram(true);
+  }
+
+  async function negarMsg() {
+    if (!msgSelecionada) return;
+    await supabase.from("telegram_messages").delete().eq("id", msgSelecionada.id);
+    setModalTelegram(false);
+    setMsgSelecionada(null);
+    carregarTelegram();
+  }
+
+  async function salvarMsg() {
+    if (!msgSelecionada) return;
+    await supabase.from("telegram_messages").update({ status: "confirmado" }).eq("id", msgSelecionada.id);
+    setModalTelegram(false);
+    setMsgSelecionada(null);
+    carregarTelegram();
+  }
+
+  async function salvarEditado() {
+    if (!msgSelecionada) return;
+    await supabase.from("telegram_messages").update({
+      status: "confirmado",
+      texto: editMsgTexto || msgSelecionada.texto,
+    }).eq("id", msgSelecionada.id);
+    setModalTelegram(false);
+    setMsgSelecionada(null);
+    carregarTelegram();
+  }
+
   async function carregar() {
     setLoading(true);
     const { data: ap } = await supabase.from("tipster_apostas").select("*").order("data",{ascending:true}).order("created_at",{ascending:true});
@@ -174,9 +221,20 @@ export default function TipsterPainel() {
     const com = (ap ?? []).map((a: Aposta) => ({ ...a, detalhes: (det ?? []).filter((d: Detalhe) => d.aposta_id === a.id) }));
     setApostas(com);
     setProgramacao((prog ?? []) as Programacao[]);
+    await carregarTelegram();
     setLoading(false);
   }
   useEffect(() => { carregar(); }, []);
+
+  useEffect(() => {
+    const channel = supabase.channel("telegram-realtime")
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "telegram_messages" }, (payload) => {
+        const nova = payload.new as TelegramMessage;
+        setTelegramMsgs(prev => [nova, ...prev]);
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, []);
 
   async function salvarResultado() {
     if (!editando) return;
@@ -385,6 +443,14 @@ export default function TipsterPainel() {
             <div className="nav-actions" style={{ display:"flex", gap:8, alignItems:"center" }}>
               <button className="nav-btn-text" onClick={carregar} style={{ padding:"6px 14px", borderRadius:8, border:`1px solid ${T.border}`, background:"transparent", color:T.muted, fontSize:12, fontWeight:600, cursor:"pointer" }}>↻ Atualizar</button>
               {isAdmin && <button onClick={exportarBackup} style={{ padding:"6px 14px", borderRadius:8, border:"none", background:T.amber, color:"#000", fontSize:12, fontWeight:700, cursor:"pointer" }}>💾 Backup</button>}
+              {isAdmin && telegramMsgs.filter(m => m.status === "pendente").length > 0 && (
+                <button onClick={() => { setAba("telegram"); }} style={{ position:"relative", padding:"6px 14px", borderRadius:8, border:"none", background:T.green, color:"white", fontSize:12, fontWeight:700, cursor:"pointer" }}>
+                  ✈️ Telegram
+                  <span style={{ position:"absolute", top:-6, right:-6, width:18, height:18, borderRadius:"50%", background:T.red, color:"white", fontSize:10, fontWeight:800, display:"flex", alignItems:"center", justifyContent:"center" }}>
+                    {telegramMsgs.filter(m => m.status === "pendente").length}
+                  </span>
+                </button>
+              )}
               <button onClick={gerarRelatorio} style={{ padding:"6px 14px", borderRadius:8, border:"none", background:T.blue, color:"white", fontSize:12, fontWeight:700, cursor:"pointer" }}>📊 Relatório</button>
               <button onClick={() => setDark(!dark)} style={{ width:36, height:36, borderRadius:8, border:`1px solid ${T.border}`, background:"transparent", color:T.muted, cursor:"pointer", fontSize:16, display:"flex", alignItems:"center", justifyContent:"center" }}>
                 {dark ? "☀️" : "🌙"}
@@ -798,6 +864,75 @@ export default function TipsterPainel() {
               <div style={{ display:"flex", justifyContent:"flex-end", gap:10, marginTop:22 }}>
                 <button onClick={() => setModalProgramacao(false)} style={{ padding:"10px 20px", borderRadius:10, border:`1px solid ${T.border}`, cursor:"pointer", background:"transparent", color:T.muted, fontSize:13, fontWeight:600 }}>Cancelar</button>
                 <button onClick={salvarProgramacao} style={{ padding:"10px 20px", borderRadius:10, border:"none", cursor:"pointer", background:T.blue, color:"white", fontSize:13, fontWeight:700 }}>{editProgramacao ? "Salvar" : "Adicionar"}</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+          {/* ── ABA TELEGRAM ── */}
+          {aba === "telegram" && isAdmin && (
+            <div style={{ display:"flex", flexDirection:"column", gap:10, animation:"fadeIn 0.3s ease" }}>
+              <p style={{ fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:1.5, color:T.muted }}>Mensagens do Telegram</p>
+              {telegramMsgs.length === 0 && (
+                <div style={{ textAlign:"center", padding:"60px 0", color:T.muted }}>
+                  <p style={{ fontSize:32, marginBottom:8 }}>✈️</p>
+                  <p style={{ fontSize:14 }}>Nenhuma mensagem recebida.</p>
+                </div>
+              )}
+              {telegramMsgs.map(msg => (
+                <div key={msg.id} style={{ borderRadius:12, padding:"14px 16px", background:T.bgCard, border:`1px solid ${msg.status === "pendente" ? T.amber : msg.status === "confirmado" ? T.green : T.border}`, display:"flex", alignItems:"center", gap:12 }}>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ display:"flex", gap:8, alignItems:"center", marginBottom:4 }}>
+                      <span style={{ fontSize:12, fontWeight:700, color:T.text }}>{msg.nome}</span>
+                      <span style={{ fontSize:10, padding:"2px 8px", borderRadius:100, fontWeight:700,
+                        background: msg.status === "pendente" ? `${T.amber}18` : msg.status === "confirmado" ? `${T.green}18` : `${T.red}18`,
+                        color: msg.status === "pendente" ? T.amber : msg.status === "confirmado" ? T.green : T.red,
+                      }}>{msg.status}</span>
+                      <span style={{ fontSize:10, color:T.muted }}>{new Date(msg.created_at).toLocaleString("pt-BR")}</span>
+                    </div>
+                    {msg.foto_file_id && <p style={{ fontSize:12, color:T.blue, marginBottom:4 }}>📷 Foto recebida</p>}
+                    {msg.texto && <p style={{ fontSize:13, color:T.text }}>{msg.texto}</p>}
+                  </div>
+                  {msg.status === "pendente" && (
+                    <button onClick={() => abrirConfirmacao(msg)} style={{ padding:"8px 16px", borderRadius:8, border:"none", background:T.blue, color:"white", fontSize:12, fontWeight:700, cursor:"pointer", flexShrink:0 }}>
+                      Confirmar
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* ── MODAL CONFIRMAÇÃO TELEGRAM ── */}
+        {modalTelegram && msgSelecionada && (
+          <div style={{ position:"fixed", inset:0, zIndex:200, display:"flex", alignItems:"center", justifyContent:"center", background:"rgba(0,0,0,0.7)", backdropFilter:"blur(6px)", padding:20 }} onClick={() => setModalTelegram(false)}>
+            <div style={{ background:T.bgCard, border:`1px solid ${T.border}`, borderRadius:18, width:"100%", maxWidth:480, padding:"24px 28px" }} onClick={e => e.stopPropagation()}>
+              <h2 style={{ fontSize:17, fontWeight:800, color:T.text, marginBottom:6 }}>Confirmar mensagem</h2>
+              <p style={{ fontSize:12, color:T.muted, marginBottom:16 }}>De: <b>{msgSelecionada.nome}</b> · {new Date(msgSelecionada.created_at).toLocaleString("pt-BR")}</p>
+
+              {msgSelecionada.foto_file_id && (
+                <div style={{ padding:"12px 16px", borderRadius:10, background:T.bg, border:`1px solid ${T.border}`, marginBottom:12, textAlign:"center" }}>
+                  <p style={{ fontSize:24, marginBottom:4 }}>📷</p>
+                  <p style={{ fontSize:12, color:T.muted }}>Foto recebida</p>
+                  <p style={{ fontSize:10, color:T.subtle, wordBreak:"break-all", marginTop:4 }}>{msgSelecionada.foto_file_id}</p>
+                </div>
+              )}
+
+              <div style={{ display:"flex", flexDirection:"column", gap:10, marginBottom:20 }}>
+                <div>
+                  <label style={{ fontSize:11, fontWeight:700, color:T.muted, textTransform:"uppercase", letterSpacing:1, display:"block", marginBottom:4 }}>Texto original</label>
+                  <div style={{ padding:"10px 12px", borderRadius:8, background:T.bg, border:`1px solid ${T.border}`, fontSize:13, color:T.text, minHeight:40 }}>{msgSelecionada.texto || "(sem texto)"}</div>
+                </div>
+                <div>
+                  <label style={{ fontSize:11, fontWeight:700, color:T.muted, textTransform:"uppercase", letterSpacing:1, display:"block", marginBottom:4 }}>Editar texto</label>
+                  <input value={editMsgTexto} onChange={e => setEditMsgTexto(e.target.value)} placeholder="Edite o texto antes de salvar..." />
+                </div>
+              </div>
+
+              <div style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
+                <button onClick={negarMsg} style={{ padding:"10px 20px", borderRadius:10, border:`1px solid ${T.red}`, background:"transparent", color:T.red, fontSize:13, fontWeight:700, cursor:"pointer" }}>✕ Negar</button>
+                <button onClick={salvarMsg} style={{ padding:"10px 20px", borderRadius:10, border:"none", background:T.green, color:"white", fontSize:13, fontWeight:700, cursor:"pointer" }}>✓ Salvar</button>
+                <button onClick={salvarEditado} style={{ padding:"10px 20px", borderRadius:10, border:"none", background:T.blue, color:"white", fontSize:13, fontWeight:700, cursor:"pointer" }}>✎ Editar</button>
               </div>
             </div>
           </div>
