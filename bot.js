@@ -7,7 +7,7 @@ const env = readFileSync(".env", "utf-8");
 const get = (key) => env.split("\n").find(l => l.startsWith(key + "="))?.split("=")?.slice(1)?.join("=")?.trim();
 
 const token = get("TELEGRAM_BOT_TOKEN");
-const supabase = createClient(get("VITE_SUPABASE_URL"), get("VITE_SUPABASE_ANON_KEY"));
+const supabase = createClient(get("VITE_SUPABASE_URL"), get("SUPABASE_SERVICE_ROLE_KEY"));
 
 if (!token) { console.error("TELEGRAM_BOT_TOKEN não encontrado"); process.exit(1); }
 
@@ -52,7 +52,12 @@ bot.on("message", async (msg) => {
       await bot.sendMessage(chatId, `❌ Código inválido ou expirado.\nGere um novo código no painel web.`);
       return;
     }
-    await supabase.from("telegram_vinculos").insert({ chat_id: chatId, user_id: profile.id });
+    const { error: vincError } = await supabase.from("telegram_vinculos").upsert({ chat_id: chatId, user_id: profile.id }, { onConflict: "chat_id" });
+    if (vincError) {
+      console.error("[VINCULO] Erro ao vincular:", vincError.message);
+      await bot.sendMessage(chatId, `❌ Erro ao vincular: ${vincError.message}`);
+      return;
+    }
     await supabase.from("user_profiles").update({ pending_code: null }).eq("id", profile.id);
     await bot.sendMessage(chatId, `✅ Telegram vinculado com sucesso!\nAgora mande fotos de bilhete para cadastrar.`);
     return;

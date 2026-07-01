@@ -8,6 +8,7 @@ import {
 // ── Types ──
 type Resultado = "pendente" | "green" | "red" | "void";
 type Tipo = "simples" | "bonus";
+type StakeTipo = "unidades" | "valor";
 type Aba = "resumo" | "analise" | "todas" | "pendentes" | "simples" | "duplas" | "triplas" | "combinadas" | "bonus" | "programacao" | "telegram";
 type VisaoAnalise = "diario" | "semanal" | "mensal" | "anual";
 
@@ -16,7 +17,7 @@ interface Detalhe {
   jogo: string; mercado: string; selecao: string; odd_parcial: number;
 }
 interface Aposta {
-  id: string; data: string; tipo: Tipo; stake_unidades: number | null;
+  id: string; data: string; tipo: Tipo; stake_unidades: number | null; stake_tipo: StakeTipo | null;
   banca_momento: number | null; valor_bonus: number | null; lucro_maximo: number | null;
   casa_aposta: string; odd_total: number; resultado: Resultado;
   lucro_reais: number | null; observacao: string | null; created_at: string;
@@ -39,9 +40,24 @@ interface TelegramMessage {
   user_id: string | null;
 }
 interface DadosBilhete {
-  data: string | null; casa_aposta: string | null; stake_unidades: number | null;
+  data: string | null; casa_aposta: string | null; stake_unidades: number | null; stake_tipo?: StakeTipo;
   tipo: string; odd_total: number;
   pernas: { esporte: string; campeonato: string; jogo: string; mercado: string; selecao: string; odd_parcial: number }[];
+}
+interface PernaForm { esporte: string; campeonato: string; jogo: string; mercado: string; selecao: string; odd_parcial: string; }
+interface ApostaForm {
+  id: string | null; data: string; casa_aposta: string;
+  stake_tipo: StakeTipo; stake_unidades: string; odd_total: string;
+  resultado: Resultado; observacao: string;
+  pernas: PernaForm[];
+}
+function apostaFormVazio(): ApostaForm {
+  return {
+    id: null, data: new Date().toISOString().split("T")[0], casa_aposta: "",
+    stake_tipo: "unidades", stake_unidades: "1", odd_total: "",
+    resultado: "pendente", observacao: "",
+    pernas: [{ esporte: "", campeonato: "", jogo: "", mercado: "", selecao: "", odd_parcial: "" }],
+  };
 }
 
 // ── Constants ──
@@ -57,7 +73,9 @@ function calcularLucro(a: Aposta, bancaBase?: number): number {
   if (a.resultado === "pendente" || a.resultado === "void") return 0;
   if (a.tipo === "bonus") return a.resultado === "green" ? (a.lucro_maximo ?? 0) : 0;
   const banca = bancaBase ?? BANCA_INICIAL_DEFAULT;
-  const stake = ((a.stake_unidades ?? 1) / 100) * banca;
+  const stake = a.stake_tipo === "valor"
+    ? (a.stake_unidades ?? 0)
+    : ((a.stake_unidades ?? 1) / 100) * banca;
   return a.resultado === "green"
     ? parseFloat((stake * (a.odd_total - 1)).toFixed(2))
     : parseFloat((-stake).toFixed(2));
@@ -152,6 +170,9 @@ export default function TipsterPainel() {
   const [cadastroPass2, setCadastroPass2] = useState("");
   const [editProfileMode, setEditProfileMode] = useState(false);
   const [telegramVinculado, setTelegramVinculado] = useState(false);
+  const [modalAposta, setModalAposta] = useState(false);
+  const [formAposta, setFormAposta] = useState<ApostaForm>(apostaFormVazio());
+  const [salvandoAposta, setSalvandoAposta] = useState(false);
 
   const bancaMomentoRef = useRef<Record<string, number>>({});
   const T = dark ? DARK : LIGHT;
@@ -180,7 +201,7 @@ export default function TipsterPainel() {
     }
     const { data: vinc } = await supabase.from("telegram_vinculos").select("chat_id").eq("user_id", user.id).maybeSingle();
     setTelegramVinculado(!!vinc?.chat_id);
-    await carregar(user.id, isAdm);
+    await carregar(user.id);
   }
 
   const ADMIN_EMAIL_MAP: Record<string, string> = { "edsondrews": "edsondrews@hotmail.com" };
@@ -263,11 +284,10 @@ export default function TipsterPainel() {
     setUserProfile(null);
   }
 
-  async function carregarTelegram(userId?: string, isAdm?: boolean) {
-    const effectiveIsAdmin = isAdm ?? isAdmin;
-    let query = supabase.from("telegram_messages").select("*").eq("status", "pendente").order("created_at", { ascending: false });
-    if (userId && !effectiveIsAdmin) query = query.eq("user_id", userId);
-    const { data } = await query;
+  async function carregarTelegram(userId?: string) {
+    if (!userId) { setTelegramMsgs([]); return; }
+    const { data } = await supabase.from("telegram_messages").select("*")
+      .eq("status", "pendente").eq("user_id", userId).order("created_at", { ascending: false });
     setTelegramMsgs((data ?? []) as TelegramMessage[]);
   }
 
@@ -276,7 +296,9 @@ export default function TipsterPainel() {
     setEditMsgTexto(msg.texto ?? "");
     setEditMode(false);
     if (msg.dados_extraidos) {
-      setEditBilhete(JSON.parse(JSON.stringify(msg.dados_extraidos)));
+      const clone = JSON.parse(JSON.stringify(msg.dados_extraidos));
+      if (!clone.stake_tipo) clone.stake_tipo = "unidades";
+      setEditBilhete(clone);
     } else {
       setEditBilhete(null);
     }
@@ -288,7 +310,7 @@ export default function TipsterPainel() {
     await supabase.from("telegram_messages").delete().eq("id", msgSelecionada.id);
     setModalTelegram(false);
     setMsgSelecionada(null);
-    carregarTelegram();
+    carregarTelegram(userLogado?.id);
   }
 
   async function excluirAposta(id: string) {
@@ -298,13 +320,86 @@ export default function TipsterPainel() {
     carregar();
   }
 
+  function abrirNovaAposta() {
+    setFormAposta(apostaFormVazio());
+    setModalAposta(true);
+  }
+
+  function abrirEditarAposta(aposta: Aposta) {
+    setFormAposta({
+      id: aposta.id,
+      data: aposta.data,
+      casa_aposta: aposta.casa_aposta || "",
+      stake_tipo: aposta.stake_tipo || "unidades",
+      stake_unidades: aposta.stake_unidades != null ? String(aposta.stake_unidades) : "",
+      odd_total: aposta.odd_total != null ? String(aposta.odd_total) : "",
+      resultado: aposta.resultado,
+      observacao: aposta.observacao || "",
+      pernas: (aposta.detalhes && aposta.detalhes.length > 0)
+        ? aposta.detalhes.map(d => ({ esporte: d.esporte, campeonato: d.campeonato, jogo: d.jogo, mercado: d.mercado, selecao: d.selecao, odd_parcial: String(d.odd_parcial) }))
+        : [{ esporte: "", campeonato: "", jogo: "", mercado: "", selecao: "", odd_parcial: "" }],
+    });
+    setModalAposta(true);
+  }
+
+  function addPernaForm() {
+    setFormAposta(f => ({ ...f, pernas: [...f.pernas, { esporte: "", campeonato: "", jogo: "", mercado: "", selecao: "", odd_parcial: "" }] }));
+  }
+  function removerPernaForm(i: number) {
+    setFormAposta(f => ({ ...f, pernas: f.pernas.length > 1 ? f.pernas.filter((_, idx) => idx !== i) : f.pernas }));
+  }
+  function updatePernaForm(i: number, campo: keyof PernaForm, valor: string) {
+    setFormAposta(f => { const n = [...f.pernas]; n[i] = { ...n[i], [campo]: valor }; return { ...f, pernas: n }; });
+  }
+  function oddCalculada(pernas: PernaForm[]): number {
+    return pernas.reduce((acc, p) => acc * (parseFloat(p.odd_parcial) || 1), 1);
+  }
+
+  async function salvarAposta() {
+    if (!userLogado) return;
+    setSalvandoAposta(true);
+    const oddTotal = parseFloat(formAposta.odd_total) || parseFloat(oddCalculada(formAposta.pernas).toFixed(3));
+    const payload = {
+      data: formAposta.data || new Date().toISOString().split("T")[0],
+      tipo: formAposta.pernas.length > 1 ? "multipla" : "simples",
+      stake_unidades: parseFloat(formAposta.stake_unidades) || 0,
+      stake_tipo: formAposta.stake_tipo,
+      casa_aposta: formAposta.casa_aposta || "",
+      odd_total: oddTotal,
+      resultado: formAposta.resultado,
+      observacao: formAposta.observacao || null,
+    };
+    const legsPayload = (aposta_id: string) => formAposta.pernas.map(p => ({
+      aposta_id, esporte: p.esporte || "", campeonato: p.campeonato || "",
+      jogo: p.jogo || "", mercado: p.mercado || "", selecao: p.selecao || "",
+      odd_parcial: parseFloat(p.odd_parcial) || 0,
+    }));
+
+    if (formAposta.id) {
+      const { error } = await supabase.from("tipster_apostas").update(payload).eq("id", formAposta.id);
+      if (error) { alert("Erro ao salvar: " + error.message); setSalvandoAposta(false); return; }
+      await supabase.from("tipster_apostas_detalhes").delete().eq("aposta_id", formAposta.id);
+      await supabase.from("tipster_apostas_detalhes").insert(legsPayload(formAposta.id));
+    } else {
+      const { data: ins, error } = await supabase.from("tipster_apostas")
+        .insert({ ...payload, banca_momento: bancaAtual, user_id: userLogado.id }).select("id").single();
+      if (error || !ins) { alert("Erro ao salvar: " + (error?.message ?? "desconhecido")); setSalvandoAposta(false); return; }
+      await supabase.from("tipster_apostas_detalhes").insert(legsPayload(ins.id));
+    }
+    setModalAposta(false);
+    setSalvandoAposta(false);
+    carregar();
+  }
+
   async function salvarEditado() {
     if (!msgSelecionada) return;
+    if (!userLogado) { alert("Sua sessão expirou. Faça login novamente antes de confirmar o bilhete."); return; }
     if (editBilhete) {
       const { data: apostaInsert, error: err1 } = await supabase.from("tipster_apostas").insert({
         data: editBilhete.data || new Date().toISOString().split("T")[0],
         tipo: editBilhete.pernas?.length > 1 ? "multipla" : "simples",
         stake_unidades: editBilhete.stake_unidades,
+        stake_tipo: editBilhete.stake_tipo || "unidades",
         banca_momento: bancaAtual,
         casa_aposta: editBilhete.casa_aposta || "",
         odd_total: editBilhete.odd_total,
@@ -330,23 +425,29 @@ export default function TipsterPainel() {
       }).eq("id", msgSelecionada.id);
       setModalTelegram(false);
       setMsgSelecionada(null);
-      carregarTelegram();
+      carregarTelegram(userLogado?.id);
     }
   }
 
-  async function carregar(userId?: string, isAdminOverride?: boolean) {
+  async function carregar(userId?: string) {
     setLoading(true);
     const effectiveUserId = userId || userLogado?.id || null;
-    const effectiveIsAdmin = isAdminOverride ?? isAdmin;
-    let queryApostas = supabase.from("tipster_apostas").select("*").order("data",{ascending:true}).order("created_at",{ascending:true});
-    if (effectiveUserId && !effectiveIsAdmin) queryApostas = queryApostas.eq("user_id", effectiveUserId);
-    const { data: ap } = await queryApostas;
-    const { data: det } = await supabase.from("tipster_apostas_detalhes").select("*");
+    if (!effectiveUserId) {
+      setApostas([]);
+      setLoading(false);
+      return;
+    }
+    const { data: ap } = await supabase.from("tipster_apostas").select("*")
+      .eq("user_id", effectiveUserId).order("data",{ascending:true}).order("created_at",{ascending:true});
+    const apostaIds = (ap ?? []).map((a: Aposta) => a.id);
+    const { data: det } = apostaIds.length > 0
+      ? await supabase.from("tipster_apostas_detalhes").select("*").in("aposta_id", apostaIds)
+      : { data: [] as Detalhe[] };
     const { data: prog } = await supabase.from("tipster_programacao").select("*").order("dia_semana");
     const com = (ap ?? []).map((a: Aposta) => ({ ...a, detalhes: (det ?? []).filter((d: Detalhe) => d.aposta_id === a.id) }));
     setApostas(com);
     setProgramacao((prog ?? []) as Programacao[]);
-    await carregarTelegram(effectiveUserId, effectiveIsAdmin);
+    await carregarTelegram(effectiveUserId);
     setLoading(false);
   }
   useEffect(() => {
@@ -611,8 +712,9 @@ export default function TipsterPainel() {
             </div>
             <div className="nav-actions" style={{ display:"flex", gap:8, alignItems:"center" }}>
               <button className="nav-btn-text" onClick={() => carregar()} style={{ padding:"6px 14px", borderRadius:8, border:`1px solid ${T.border}`, background:"transparent", color:T.muted, fontSize:12, fontWeight:600, cursor:"pointer" }}>↻ Atualizar</button>
+              {userLogado && <button onClick={abrirNovaAposta} style={{ padding:"6px 14px", borderRadius:8, border:"none", background:T.blue, color:"white", fontSize:12, fontWeight:700, cursor:"pointer" }}>+ Nova Aposta</button>}
               {isAdmin && <button onClick={exportarBackup} style={{ padding:"6px 14px", borderRadius:8, border:"none", background:T.amber, color:"#000", fontSize:12, fontWeight:700, cursor:"pointer" }}>💾 Backup</button>}
-              {isAdmin && telegramMsgs.filter(m => m.status === "pendente").length > 0 && (
+              {telegramMsgs.filter(m => m.status === "pendente").length > 0 && (
                 <button onClick={() => { setAba("telegram"); }} style={{ position:"relative", padding:"6px 14px", borderRadius:8, border:"none", background:T.green, color:"white", fontSize:12, fontWeight:700, cursor:"pointer" }}>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="white" style={{marginRight:4, verticalAlign:"middle"}}><path d="M12 0C5.37 0 0 5.37 0 12s5.37 12 12 12 12-5.37 12-12S18.63 0 12 0zm5.95 7.47l-1.97 9.28c-.15.67-.54.83-1.09.52l-3.02-2.22-1.46 1.4c-.16.16-.3.3-.61.3l.22-3.06 5.56-5.02c.24-.22-.05-.33-.37-.14L8.68 13.3l-2.97-.93c-.65-.2-.66-.65.14-.96l11.6-4.47c.54-.2 1.01.13.83.96l-.16-.12z"/></svg> Telegram
                   <span style={{ position:"absolute", top:-6, right:-6, width:18, height:18, borderRadius:"50%", background:T.red, color:"white", fontSize:10, fontWeight:800, display:"flex", alignItems:"center", justifyContent:"center" }}>
@@ -1256,7 +1358,8 @@ export default function TipsterPainel() {
                 <CardAposta key={aposta.id} aposta={aposta} bancaMomentoCalc={bancaMomentoCalc}
                   expandido={expandido} setExpandido={setExpandido}
                   editando={editando} setEditando={setEditando}
-                  salvarResultado={salvarResultado} excluirAposta={excluirAposta} salvando={salvando} T={T} isAdmin={isAdmin} moeda={MOEDA} />
+                  salvarResultado={salvarResultado} excluirAposta={excluirAposta} salvando={salvando} T={T} moeda={MOEDA}
+                  podeEditar={!!userLogado} onEditarAposta={abrirEditarAposta} />
               ))}
             </div>
           )}
@@ -1274,7 +1377,8 @@ export default function TipsterPainel() {
                 <CardAposta key={aposta.id} aposta={aposta} bancaMomentoCalc={bancaMomentoCalc}
                   expandido={expandido} setExpandido={setExpandido}
                   editando={editando} setEditando={setEditando}
-                  salvarResultado={salvarResultado} excluirAposta={excluirAposta} salvando={salvando} T={T} isAdmin={isAdmin} moeda={MOEDA} />
+                  salvarResultado={salvarResultado} excluirAposta={excluirAposta} salvando={salvando} T={T} moeda={MOEDA}
+                  podeEditar={!!userLogado} onEditarAposta={abrirEditarAposta} />
               ))}
             </div>
           )}
@@ -1300,7 +1404,8 @@ export default function TipsterPainel() {
                 <CardAposta key={aposta.id} aposta={aposta} bancaMomentoCalc={bancaMomentoCalc}
                   expandido={expandido} setExpandido={setExpandido}
                   editando={editando} setEditando={setEditando}
-                  salvarResultado={salvarResultado} excluirAposta={excluirAposta} salvando={salvando} T={T} isAdmin={isAdmin} moeda={MOEDA} />
+                  salvarResultado={salvarResultado} excluirAposta={excluirAposta} salvando={salvando} T={T} moeda={MOEDA}
+                  podeEditar={!!userLogado} onEditarAposta={abrirEditarAposta} />
               ))}
 
               </div>
@@ -1335,7 +1440,8 @@ export default function TipsterPainel() {
                 <CardAposta key={aposta.id} aposta={aposta} bancaMomentoCalc={{}}
                   expandido={expandido} setExpandido={setExpandido}
                   editando={editando} setEditando={setEditando}
-                  salvarResultado={salvarResultado} excluirAposta={excluirAposta} salvando={salvando} T={T} isAdmin={isAdmin} moeda={MOEDA} />
+                  salvarResultado={salvarResultado} excluirAposta={excluirAposta} salvando={salvando} T={T} moeda={MOEDA}
+                  podeEditar={!!userLogado} onEditarAposta={abrirEditarAposta} />
               ))}
             </div>
           )}
@@ -1408,7 +1514,7 @@ export default function TipsterPainel() {
         )}
 
           {/* ── ABA TELEGRAM ── */}
-          {aba === "telegram" && isAdmin && (
+          {aba === "telegram" && userLogado && (
             <div style={{ display:"flex", flexDirection:"column", gap:10, animation:"fadeIn 0.3s ease" }}>
               <p style={{ fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:1.5, color:T.muted }}>Mensagens do Telegram</p>
               {telegramMsgs.length === 0 && (
@@ -1453,7 +1559,7 @@ export default function TipsterPainel() {
                   <div style={{ display:"flex", flexWrap:"wrap", gap:8, marginBottom:10 }}>
                     <span style={{ fontSize:12, padding:"4px 10px", borderRadius:6, background:T.bg, border:`1px solid ${T.border}`, color:T.text }}>📅 {editBilhete.data || "sem data"}</span>
                     <span style={{ fontSize:12, padding:"4px 10px", borderRadius:6, background:T.bg, border:`1px solid ${T.border}`, color:T.text }}>🏢 {editBilhete.casa_aposta || "—"}</span>
-                    <span style={{ fontSize:12, padding:"4px 10px", borderRadius:6, background:T.bg, border:`1px solid ${T.border}`, color:T.text }}>🎯 {editBilhete.stake_unidades != null ? editBilhete.stake_unidades + "u" : "—"}</span>
+                    <span style={{ fontSize:12, padding:"4px 10px", borderRadius:6, background:T.bg, border:`1px solid ${T.border}`, color:T.text }}>🎯 {editBilhete.stake_unidades != null ? (editBilhete.stake_tipo === "valor" ? fmtBRL(editBilhete.stake_unidades, MOEDA) : editBilhete.stake_unidades + "u") : "—"}</span>
                     <span style={{ fontSize:12, padding:"4px 10px", borderRadius:6, background:T.bg, border:`1px solid ${T.border}`, color:T.text }}>📊 {editBilhete.odd_total}</span>
                     <span style={{ fontSize:12, padding:"4px 10px", borderRadius:6, background:`${T.blue}18`, border:`1px solid ${T.blue}40`, color:T.blue }}>{editBilhete.pernas?.length ?? 0} perna(s)</span>
                   </div>
@@ -1486,8 +1592,14 @@ export default function TipsterPainel() {
                       <input type="text" placeholder="Ex: 22BET" value={editBilhete.casa_aposta||""} onChange={e => setEditBilhete({...editBilhete, casa_aposta:e.target.value||null})} style={{ width:"100%", padding:"7px 9px", borderRadius:8, border:`2px solid ${!editBilhete.casa_aposta ? "#f97316" : T.border}`, background:T.bg, color:T.text, fontSize:12, boxSizing:"border-box" }}/>
                     </div>
                     <div>
-                      <label style={{ fontSize:10, fontWeight:700, color:T.muted }}>STAKE (un)</label>
-                      <input type="number" step="0.1" min="0" placeholder="1.5" value={editBilhete.stake_unidades??""} onChange={e => setEditBilhete({...editBilhete, stake_unidades:e.target.value ? parseFloat(e.target.value) : null})} style={{ width:"100%", padding:"7px 9px", borderRadius:8, border:`2px solid ${editBilhete.stake_unidades==null ? "#f97316" : T.border}`, background:T.bg, color:T.text, fontSize:12, boxSizing:"border-box" }}/>
+                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:2 }}>
+                        <label style={{ fontSize:10, fontWeight:700, color:T.muted }}>{editBilhete.stake_tipo === "valor" ? `VALOR (${MOEDA})` : "STAKE (un)"}</label>
+                        <div style={{ display:"flex", gap:2 }}>
+                          <button type="button" onClick={() => setEditBilhete({...editBilhete, stake_tipo:"unidades"})} style={{ fontSize:9, padding:"2px 6px", borderRadius:4, border:"none", cursor:"pointer", background:(editBilhete.stake_tipo??"unidades")==="unidades"?T.blue:T.bg, color:(editBilhete.stake_tipo??"unidades")==="unidades"?"white":T.muted, fontWeight:700 }}>un</button>
+                          <button type="button" onClick={() => setEditBilhete({...editBilhete, stake_tipo:"valor"})} style={{ fontSize:9, padding:"2px 6px", borderRadius:4, border:"none", cursor:"pointer", background:editBilhete.stake_tipo==="valor"?T.blue:T.bg, color:editBilhete.stake_tipo==="valor"?"white":T.muted, fontWeight:700 }}>{MOEDA}</button>
+                        </div>
+                      </div>
+                      <input type="number" step="0.1" min="0" placeholder={editBilhete.stake_tipo === "valor" ? "50" : "1.5"} value={editBilhete.stake_unidades??""} onChange={e => setEditBilhete({...editBilhete, stake_unidades:e.target.value ? parseFloat(e.target.value) : null})} style={{ width:"100%", padding:"7px 9px", borderRadius:8, border:`2px solid ${editBilhete.stake_unidades==null ? "#f97316" : T.border}`, background:T.bg, color:T.text, fontSize:12, boxSizing:"border-box" }}/>
                     </div>
                     <div>
                       <label style={{ fontSize:10, fontWeight:700, color:T.muted }}>ODD TOTAL</label>
@@ -1541,6 +1653,83 @@ export default function TipsterPainel() {
                   <button onClick={() => setEditMode(false)} style={{ padding:"9px 16px", borderRadius:10, border:"none", background:T.muted, color:"white", fontSize:12, fontWeight:700, cursor:"pointer" }}>👁 Visualizar</button>
                 )}
                 <button onClick={salvarEditado} style={{ padding:"9px 16px", borderRadius:10, border:"none", background:T.green, color:"white", fontSize:12, fontWeight:700, cursor:"pointer" }}>✓ Salvar</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── MODAL APOSTA (cadastro manual / edição) ── */}
+        {modalAposta && (
+          <div style={{ position:"fixed", inset:0, zIndex:250, display:"flex", alignItems:"center", justifyContent:"center", background:"rgba(0,0,0,0.7)", backdropFilter:"blur(6px)", padding:20 }} onClick={() => !salvandoAposta && setModalAposta(false)}>
+            <div style={{ background:T.bgCard, border:`1px solid ${T.border}`, borderRadius:18, width:"100%", maxWidth:560, maxHeight:"88vh", overflowY:"auto", padding:"24px 28px" }} onClick={e => e.stopPropagation()}>
+              <h2 style={{ fontSize:17, fontWeight:800, color:T.text, marginBottom:4 }}>{formAposta.id ? "Editar Aposta" : "Nova Aposta"}</h2>
+              <p style={{ fontSize:12, color:T.muted, marginBottom:16 }}>{labelTipo(formAposta.pernas.length)} · {formAposta.pernas.length} perna(s)</p>
+
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:10 }}>
+                <div>
+                  <label style={{ fontSize:10, fontWeight:700, color:T.muted }}>DATA</label>
+                  <input type="date" value={formAposta.data} onChange={e => setFormAposta({...formAposta, data:e.target.value})} style={{ width:"100%", padding:"7px 9px", borderRadius:8, border:`1px solid ${T.border}`, background:T.bg, color:T.text, fontSize:12, boxSizing:"border-box" }}/>
+                </div>
+                <div>
+                  <label style={{ fontSize:10, fontWeight:700, color:T.muted }}>CASA</label>
+                  <input type="text" placeholder="Ex: 22BET" value={formAposta.casa_aposta} onChange={e => setFormAposta({...formAposta, casa_aposta:e.target.value})} style={{ width:"100%", padding:"7px 9px", borderRadius:8, border:`1px solid ${T.border}`, background:T.bg, color:T.text, fontSize:12, boxSizing:"border-box" }}/>
+                </div>
+                <div>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:2 }}>
+                    <label style={{ fontSize:10, fontWeight:700, color:T.muted }}>{formAposta.stake_tipo === "valor" ? `VALOR (${MOEDA})` : "STAKE (un)"}</label>
+                    <div style={{ display:"flex", gap:2 }}>
+                      <button type="button" onClick={() => setFormAposta({...formAposta, stake_tipo:"unidades"})} style={{ fontSize:9, padding:"2px 6px", borderRadius:4, border:"none", cursor:"pointer", background:formAposta.stake_tipo==="unidades"?T.blue:T.bg, color:formAposta.stake_tipo==="unidades"?"white":T.muted, fontWeight:700 }}>un</button>
+                      <button type="button" onClick={() => setFormAposta({...formAposta, stake_tipo:"valor"})} style={{ fontSize:9, padding:"2px 6px", borderRadius:4, border:"none", cursor:"pointer", background:formAposta.stake_tipo==="valor"?T.blue:T.bg, color:formAposta.stake_tipo==="valor"?"white":T.muted, fontWeight:700 }}>{MOEDA}</button>
+                    </div>
+                  </div>
+                  <input type="number" step="0.1" min="0" placeholder={formAposta.stake_tipo === "valor" ? "50" : "1.5"} value={formAposta.stake_unidades} onChange={e => setFormAposta({...formAposta, stake_unidades:e.target.value})} style={{ width:"100%", padding:"7px 9px", borderRadius:8, border:`1px solid ${T.border}`, background:T.bg, color:T.text, fontSize:12, boxSizing:"border-box" }}/>
+                </div>
+                <div>
+                  <label style={{ fontSize:10, fontWeight:700, color:T.muted }}>ODD TOTAL <span style={{opacity:0.6}}>(calc: {oddCalculada(formAposta.pernas).toFixed(2)})</span></label>
+                  <input type="number" step="0.01" min="0" placeholder={oddCalculada(formAposta.pernas).toFixed(2)} value={formAposta.odd_total} onChange={e => setFormAposta({...formAposta, odd_total:e.target.value})} style={{ width:"100%", padding:"7px 9px", borderRadius:8, border:`1px solid ${T.border}`, background:T.bg, color:T.text, fontSize:12, boxSizing:"border-box" }}/>
+                </div>
+                <div style={{ gridColumn:"1 / -1" }}>
+                  <label style={{ fontSize:10, fontWeight:700, color:T.muted }}>RESULTADO</label>
+                  <select value={formAposta.resultado} onChange={e => setFormAposta({...formAposta, resultado:e.target.value as Resultado})} style={{ width:"100%", padding:"7px 9px", borderRadius:8, border:`1px solid ${T.border}`, background:T.bg, color:T.text, fontSize:12 }}>
+                    <option value="pendente">Pendente</option>
+                    <option value="green">Green</option>
+                    <option value="red">Red</option>
+                    <option value="void">Void</option>
+                  </select>
+                </div>
+              </div>
+
+              <p style={{ fontSize:10, fontWeight:700, color:T.muted, textTransform:"uppercase", letterSpacing:1, marginTop:14, marginBottom:6 }}>Jogos / Pernas</p>
+              {formAposta.pernas.map((p, i) => (
+                <div key={i} style={{ background:T.bg, borderRadius:8, padding:8, marginBottom:6, border:`1px solid ${T.border}` }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", marginBottom:4 }}>
+                    <span style={{ fontSize:10, fontWeight:700, color:T.muted }}>Jogo {i + 1}</span>
+                    {formAposta.pernas.length > 1 && (
+                      <span onClick={() => removerPernaForm(i)} style={{ fontSize:11, color:T.red, cursor:"pointer", fontWeight:700 }}>✕ remover</span>
+                    )}
+                  </div>
+                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 2fr", gap:6, marginBottom:6 }}>
+                    <input type="text" placeholder="Esporte" value={p.esporte} onChange={e => updatePernaForm(i, "esporte", e.target.value)} style={{ padding:"6px 7px", borderRadius:6, border:`1px solid ${T.border}`, background:T.bgCard, color:T.text, fontSize:11, boxSizing:"border-box" }}/>
+                    <input type="text" placeholder="Campeonato" value={p.campeonato} onChange={e => updatePernaForm(i, "campeonato", e.target.value)} style={{ padding:"6px 7px", borderRadius:6, border:`1px solid ${T.border}`, background:T.bgCard, color:T.text, fontSize:11, boxSizing:"border-box" }}/>
+                    <input type="text" placeholder="Jogo (Time A x Time B)" value={p.jogo} onChange={e => updatePernaForm(i, "jogo", e.target.value)} style={{ padding:"6px 7px", borderRadius:6, border:`1px solid ${T.border}`, background:T.bgCard, color:T.text, fontSize:11, boxSizing:"border-box" }}/>
+                  </div>
+                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 0.7fr", gap:6 }}>
+                    <input type="text" placeholder="Mercado" value={p.mercado} onChange={e => updatePernaForm(i, "mercado", e.target.value)} style={{ padding:"6px 7px", borderRadius:6, border:`1px solid ${T.border}`, background:T.bgCard, color:T.text, fontSize:11, boxSizing:"border-box" }}/>
+                    <input type="text" placeholder="Seleção" value={p.selecao} onChange={e => updatePernaForm(i, "selecao", e.target.value)} style={{ padding:"6px 7px", borderRadius:6, border:`1px solid ${T.border}`, background:T.bgCard, color:T.text, fontSize:11, boxSizing:"border-box" }}/>
+                    <input type="number" step="0.01" min="0" placeholder="Odd" value={p.odd_parcial} onChange={e => updatePernaForm(i, "odd_parcial", e.target.value)} style={{ padding:"6px 7px", borderRadius:6, border:`1px solid ${T.border}`, background:T.bgCard, color:T.text, fontSize:11, boxSizing:"border-box" }}/>
+                  </div>
+                </div>
+              ))}
+              <button type="button" onClick={addPernaForm} style={{ width:"100%", padding:8, borderRadius:8, border:`1px dashed ${T.border}`, background:"transparent", color:T.blue, fontSize:12, fontWeight:700, cursor:"pointer", marginBottom:12 }}>+ Adicionar jogo</button>
+
+              <div>
+                <label style={{ fontSize:10, fontWeight:700, color:T.muted }}>OBSERVAÇÃO</label>
+                <input value={formAposta.observacao} onChange={e => setFormAposta({...formAposta, observacao:e.target.value})} placeholder="Opcional..." style={{ width:"100%", padding:"7px 9px", borderRadius:8, border:`1px solid ${T.border}`, background:T.bg, color:T.text, fontSize:12, boxSizing:"border-box" }}/>
+              </div>
+
+              <div style={{ display:"flex", gap:8, justifyContent:"flex-end", marginTop:18 }}>
+                <button onClick={() => setModalAposta(false)} disabled={salvandoAposta} style={{ padding:"9px 16px", borderRadius:10, border:`1px solid ${T.border}`, background:"transparent", color:T.muted, fontSize:12, fontWeight:700, cursor:"pointer" }}>Cancelar</button>
+                <button onClick={salvarAposta} disabled={salvandoAposta} style={{ padding:"9px 16px", borderRadius:10, border:"none", background:T.green, color:"white", fontSize:12, fontWeight:700, cursor:"pointer", opacity:salvandoAposta?0.6:1 }}>{salvandoAposta ? "Salvando..." : "✓ Salvar aposta"}</button>
               </div>
             </div>
           </div>
@@ -1637,12 +1826,13 @@ export default function TipsterPainel() {
 }
 
 // ── Card de aposta ──
-function CardAposta({ aposta, bancaMomentoCalc, expandido, setExpandido, editando, setEditando, salvarResultado, excluirAposta, salvando, T, isAdmin, moeda }: {
+function CardAposta({ aposta, bancaMomentoCalc, expandido, setExpandido, editando, setEditando, salvarResultado, excluirAposta, salvando, T, moeda, podeEditar, onEditarAposta }: {
   aposta: Aposta; bancaMomentoCalc?: Record<string, number>;
   expandido: string | null; setExpandido: (id: string | null) => void;
   editando: { id: string; resultado: Resultado } | null;
   setEditando: (v: { id: string; resultado: Resultado } | null) => void;
-  salvarResultado: () => void; excluirAposta: (id: string) => void; salvando: boolean; T: typeof DARK; isAdmin: boolean; moeda?: string;
+  salvarResultado: () => void; excluirAposta: (id: string) => void; salvando: boolean; T: typeof DARK; moeda?: string;
+  podeEditar?: boolean; onEditarAposta?: (a: Aposta) => void;
 }) {
   const lucro = calcularLucro(aposta, bancaMomentoCalc?.[aposta.id]);
   const isExp = expandido === aposta.id;
@@ -1651,7 +1841,10 @@ function CardAposta({ aposta, bancaMomentoCalc, expandido, setExpandido, editand
   const isBonus = aposta.tipo === "bonus";
   const stakeValor = isBonus
     ? (aposta.valor_bonus ?? 0)
-    : ((aposta.stake_unidades ?? 1) / 100) * (aposta.banca_momento ?? BANCA_INICIAL_DEFAULT);
+    : aposta.stake_tipo === "valor"
+      ? (aposta.stake_unidades ?? 0)
+      : ((aposta.stake_unidades ?? 1) / 100) * (aposta.banca_momento ?? BANCA_INICIAL_DEFAULT);
+  const stakeLabel = isBonus ? "" : (aposta.stake_tipo === "valor" ? fmtBRL(aposta.stake_unidades ?? 0, moeda) : `${aposta.stake_unidades}u`);
 
   const labelPrincipal = nLegs <= 1
     ? (aposta.detalhes?.[0]?.jogo ?? "—")
@@ -1693,7 +1886,7 @@ function CardAposta({ aposta, bancaMomentoCalc, expandido, setExpandido, editand
           )}
         </div>
 
-        {!isBonus && <span style={{ fontSize:11, color:T.muted, flexShrink:0 }}>{aposta.stake_unidades}u</span>}
+        {!isBonus && <span style={{ fontSize:11, color:T.muted, flexShrink:0 }}>{stakeLabel}</span>}
         <span style={{ fontSize:13, fontFamily:"monospace", color:T.blue, fontWeight:700, flexShrink:0 }}>@{aposta.odd_total}</span>
         <ResultadoBadge resultado={aposta.resultado} T={T} />
         {aposta.resultado !== "pendente" && aposta.resultado !== "void" && (
@@ -1715,7 +1908,7 @@ function CardAposta({ aposta, bancaMomentoCalc, expandido, setExpandido, editand
                 : { label:"Valor apostado", valor:fmtBRL(stakeValor, moeda) },
               isBonus
                 ? { label:"Lucro máximo", valor:fmtBRL(aposta.lucro_maximo ?? 0, moeda) }
-                : { label:"Stake", valor:`${aposta.stake_unidades}u` },
+                : { label:"Stake", valor:stakeLabel },
               ...(aposta.observacao ? [{ label:"Obs", valor:aposta.observacao }] : []),
             ].map((item, i) => (
               <div key={i} style={{ padding:"6px 12px", borderRadius:8, background:T.bg, border:`1px solid ${T.border}` }}>
@@ -1773,11 +1966,16 @@ function CardAposta({ aposta, bancaMomentoCalc, expandido, setExpandido, editand
                 </button>
               </>
             ) : (
-              isAdmin && <button onClick={() => setEditando({ id:aposta.id, resultado:aposta.resultado })} style={{ padding:"7px 14px", borderRadius:8, border:"none", cursor:"pointer", background:T.blue, color:"white", fontSize:12, fontWeight:700 }}>
-                Editar
+              podeEditar && <button onClick={() => setEditando({ id:aposta.id, resultado:aposta.resultado })} style={{ padding:"7px 14px", borderRadius:8, border:"none", cursor:"pointer", background:T.blue, color:"white", fontSize:12, fontWeight:700 }}>
+                Resultado
               </button>
             )}
-            {isAdmin && (
+            {podeEditar && onEditarAposta && (
+              <button onClick={() => onEditarAposta(aposta)} style={{ padding:"7px 14px", borderRadius:8, border:`1px solid ${T.border}`, cursor:"pointer", background:"transparent", color:T.text, fontSize:12, fontWeight:700 }}>
+                ✏️ Editar aposta
+              </button>
+            )}
+            {podeEditar && (
               <button onClick={() => excluirAposta(aposta.id)} style={{ padding:"7px 14px", borderRadius:8, border:`1px solid ${T.red}`, cursor:"pointer", background:"transparent", color:T.red, fontSize:12, fontWeight:700 }}>
                 Excluir
               </button>

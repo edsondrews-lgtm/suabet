@@ -4,10 +4,10 @@ import { extrairBilhete } from "../lib/extrairBilhete.js";
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(200).json({ ok: true });
 
-  const { VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY, TELEGRAM_BOT_TOKEN } = process.env;
+  const { VITE_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, TELEGRAM_BOT_TOKEN } = process.env;
   if (!VITE_SUPABASE_URL) return res.status(500).json({ error: "Supabase not configured" });
 
-  const supabase = createClient(VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY);
+  const supabase = createClient(VITE_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
   const update = req.body;
 
   if (update.message) {
