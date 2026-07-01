@@ -137,6 +137,7 @@ const LIGHT = {
 export default function TipsterPainel() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [menuLogin, setMenuLogin] = useState(false);
+  const [menuAdmin, setMenuAdmin] = useState(false);
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPass, setLoginPass] = useState("");
   const [loginErro, setLoginErro] = useState("");
@@ -784,7 +785,6 @@ export default function TipsterPainel() {
             <div className="nav-actions" style={{ display:"flex", gap:8, alignItems:"center" }}>
               <button className="nav-btn-text" onClick={() => carregar()} style={{ padding:"6px 14px", borderRadius:8, border:`1px solid ${T.border}`, background:"transparent", color:T.muted, fontSize:12, fontWeight:600, cursor:"pointer" }}>↻ Atualizar</button>
               {userLogado && <button onClick={abrirNovaAposta} style={{ padding:"6px 14px", borderRadius:8, border:"none", background:T.blue, color:"white", fontSize:12, fontWeight:700, cursor:"pointer" }}>+ Nova Aposta</button>}
-              {isAdmin && <button onClick={exportarBackup} style={{ padding:"6px 14px", borderRadius:8, border:"none", background:T.amber, color:"#000", fontSize:12, fontWeight:700, cursor:"pointer" }}>💾 Backup</button>}
               {telegramMsgs.filter(m => m.status === "pendente").length > 0 && (
                 <button onClick={() => { setAba("telegram"); }} style={{ position:"relative", padding:"6px 14px", borderRadius:8, border:"none", background:T.green, color:"white", fontSize:12, fontWeight:700, cursor:"pointer" }}>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="white" style={{marginRight:4, verticalAlign:"middle"}}><path d="M12 0C5.37 0 0 5.37 0 12s5.37 12 12 12 12-5.37 12-12S18.63 0 12 0zm5.95 7.47l-1.97 9.28c-.15.67-.54.83-1.09.52l-3.02-2.22-1.46 1.4c-.16.16-.3.3-.61.3l.22-3.06 5.56-5.02c.24-.22-.05-.33-.37-.14L8.68 13.3l-2.97-.93c-.65-.2-.66-.65.14-.96l11.6-4.47c.54-.2 1.01.13.83.96l-.16-.12z"/></svg> Telegram
@@ -793,8 +793,18 @@ export default function TipsterPainel() {
                   </span>
                 </button>
               )}
-              {isAdmin && <button onClick={gerarRelatorio} style={{ padding:"6px 14px", borderRadius:8, border:"none", background:T.blue, color:"white", fontSize:12, fontWeight:700, cursor:"pointer" }}>📊 Relatório</button>}
-              {isAdmin && <button onClick={() => { setAba("usuarios"); carregarUsuarios(); }} style={{ padding:"6px 14px", borderRadius:8, border:`1px solid ${T.border}`, background:"transparent", color:T.text, fontSize:12, fontWeight:700, cursor:"pointer" }}>👥 Usuários</button>}
+              {isAdmin && (
+                <div style={{ position:"relative" }}>
+                  <button onClick={() => setMenuAdmin(!menuAdmin)} style={{ padding:"6px 14px", borderRadius:8, border:`1px solid ${T.border}`, background:"transparent", color:T.text, fontSize:12, fontWeight:700, cursor:"pointer" }}>⚙️ Admin</button>
+                  {menuAdmin && (
+                    <div style={{ position:"absolute", right:0, top:44, background:T.bgCard, border:`1px solid ${T.border}`, borderRadius:12, padding:8, width:200, zIndex:100, boxShadow:"0 8px 32px rgba(0,0,0,0.4)", display:"flex", flexDirection:"column", gap:4 }}>
+                      <button onClick={() => { setMenuAdmin(false); exportarBackup(); }} style={{ width:"100%", textAlign:"left", padding:10, borderRadius:8, border:"none", background:"transparent", color:T.text, fontSize:13, fontWeight:600, cursor:"pointer" }}>💾 Backup</button>
+                      <button onClick={() => { setMenuAdmin(false); gerarRelatorio(); }} style={{ width:"100%", textAlign:"left", padding:10, borderRadius:8, border:"none", background:"transparent", color:T.text, fontSize:13, fontWeight:600, cursor:"pointer" }}>📊 Relatório</button>
+                      <button onClick={() => { setMenuAdmin(false); setAba("usuarios"); carregarUsuarios(); }} style={{ width:"100%", textAlign:"left", padding:10, borderRadius:8, border:"none", background:"transparent", color:T.text, fontSize:13, fontWeight:600, cursor:"pointer" }}>👥 Usuários</button>
+                    </div>
+                  )}
+                </div>
+              )}
               <button onClick={() => setDark(!dark)} style={{ width:36, height:36, borderRadius:8, border:`1px solid ${T.border}`, background:"transparent", color:T.muted, cursor:"pointer", fontSize:16, display:"flex", alignItems:"center", justifyContent:"center" }}>
                 {dark ? "☀️" : "🌙"}
               </button>
@@ -1923,6 +1933,8 @@ export default function TipsterPainel() {
       <style>{`
         @media (max-width: 768px) {
           .nav-btn-text { display: none !important; }
+          .nav-inner { height: auto !important; flex-wrap: wrap !important; padding: 10px 16px !important; gap: 8px !important; }
+          .nav-actions { flex-wrap: wrap !important; justify-content: flex-end !important; }
           .hero-card { padding: 18px 16px !important; }
           .hero-row { flex-direction: column !important; }
           .hero-row > div:last-child { text-align: left !important; }
