@@ -9,7 +9,7 @@ import {
 type Resultado = "pendente" | "green" | "red" | "void";
 type Tipo = "simples" | "bonus";
 type StakeTipo = "unidades" | "valor";
-type Aba = "resumo" | "analise" | "todas" | "pendentes" | "simples" | "duplas" | "triplas" | "combinadas" | "bonus" | "programacao" | "telegram";
+type Aba = "resumo" | "analise" | "todas" | "pendentes" | "simples" | "duplas" | "triplas" | "combinadas" | "bonus" | "programacao" | "telegram" | "usuarios";
 type VisaoAnalise = "diario" | "semanal" | "mensal" | "anual";
 
 interface Detalhe {
@@ -26,7 +26,12 @@ interface Aposta {
 }
 interface UserProfile {
   id: string; nome: string | null; banca_inicial: number; moeda: string;
-  telegram_chat_id: number | null; created_at: string;
+  telegram_chat_id: number | null; created_at: string; role?: string;
+}
+interface UsuarioRelatorio {
+  id: string; nome: string | null; moeda: string; banca_inicial: number; created_at: string;
+  totalApostas: number; resolvidas: number; greens: number; reds: number; pendentes: number;
+  bancaAtual: number; lucroTotal: number;
 }
 interface Programacao {
   id: string; casa: string; dia_semana: string; valor: number;
@@ -173,6 +178,8 @@ export default function TipsterPainel() {
   const [modalAposta, setModalAposta] = useState(false);
   const [formAposta, setFormAposta] = useState<ApostaForm>(apostaFormVazio());
   const [salvandoAposta, setSalvandoAposta] = useState(false);
+  const [usuarios, setUsuarios] = useState<UsuarioRelatorio[]>([]);
+  const [loadingUsuarios, setLoadingUsuarios] = useState(false);
 
   const bancaMomentoRef = useRef<Record<string, number>>({});
   const T = dark ? DARK : LIGHT;
@@ -193,7 +200,18 @@ export default function TipsterPainel() {
 
   async function aoLogar(user: any) {
     setUserLogado(user);
-    const { data: profile } = await supabase.from("user_profiles").select("*").eq("id", user.id).single();
+    let { data: profile } = await supabase.from("user_profiles").select("*").eq("id", user.id).maybeSingle();
+    if (!profile) {
+      const meta = user.user_metadata || {};
+      const { data: criado, error: criarErr } = await supabase.from("user_profiles").upsert({
+        id: user.id,
+        nome: meta.nome || user.email?.split("@")[0] || "",
+        banca_inicial: meta.banca_inicial || 1000,
+        moeda: meta.moeda || "BRL",
+      }).select("*").single();
+      if (criarErr) console.error("Erro ao criar perfil:", criarErr);
+      profile = criado ?? null;
+    }
     const isAdm = profile?.role === "admin";
     if (profile) {
       setUserProfile(profile as UserProfile);
@@ -224,24 +242,27 @@ export default function TipsterPainel() {
     setLoginErro("");
     if (loginPass !== cadastroPass2) { setLoginErro("As senhas não coincidem"); setLoginLoading(false); return; }
     if (loginPass.length < 6) { setLoginErro("Senha deve ter no mínimo 6 caracteres"); setLoginLoading(false); return; }
-    const { data, error } = await supabase.auth.signUp({ email: loginEmail, password: loginPass });
+    const { data, error } = await supabase.auth.signUp({
+      email: loginEmail,
+      password: loginPass,
+      options: {
+        data: {
+          nome: formProfile.nome || loginEmail.split("@")[0],
+          banca_inicial: parseFloat(formProfile.banca) || 1000,
+          moeda: formProfile.moeda,
+        },
+      },
+    });
     if (error) { setLoginErro(error.message); setLoginLoading(false); return; }
-    if (data?.user) {
-      const { error: profileErr } = await supabase.from("user_profiles").upsert({
-        id: data.user.id,
-        nome: formProfile.nome || loginEmail.split("@")[0],
-        banca_inicial: parseFloat(formProfile.banca) || 1000,
-        moeda: formProfile.moeda,
-      });
-      if (profileErr) { console.error(profileErr); setLoginErro("Conta criada, mas erro ao salvar perfil: " + profileErr.message); setLoginLoading(false); return; }
-      const { data: profile } = await supabase.from("user_profiles").select("*").eq("id", data.user.id).single();
-      setUserLogado(data.user);
-      setUserProfile(profile as UserProfile);
+    if (data?.session && data?.user) {
+      await aoLogar(data.user);
       setMenuLogin(false);
       setTelaCadastro(false);
       setLoginEmail(""); setLoginPass(""); setCadastroPass2("");
       setFormProfile({ nome: "", banca: "1000", moeda: "BRL" });
-      carregar(data.user.id);
+    } else {
+      setTelaCadastro(false);
+      setLoginErro("Conta criada! Verifique seu email e confirme antes de entrar.");
     }
     setLoginLoading(false);
   };
@@ -450,6 +471,41 @@ export default function TipsterPainel() {
     await carregarTelegram(effectiveUserId);
     setLoading(false);
   }
+
+  async function carregarUsuarios() {
+    setLoadingUsuarios(true);
+    const { data: perfis } = await supabase.from("user_profiles").select("*").order("created_at", { ascending: false });
+    const { data: todasApostas } = await supabase.from("tipster_apostas").select("*")
+      .order("data", { ascending: true }).order("created_at", { ascending: true });
+    const porUsuario: Record<string, Aposta[]> = {};
+    (todasApostas ?? []).forEach((a: Aposta) => {
+      const uid = a.user_id || "sem_dono";
+      if (!porUsuario[uid]) porUsuario[uid] = [];
+      porUsuario[uid].push(a);
+    });
+    const relatorio: UsuarioRelatorio[] = (perfis ?? []).map((p: UserProfile) => {
+      const lista = porUsuario[p.id] ?? [];
+      const bancaInicial = p.banca_inicial ?? BANCA_INICIAL_DEFAULT;
+      let bancaAcum = bancaInicial;
+      let greens = 0, reds = 0, pendentes = 0;
+      for (const a of lista) {
+        if (a.resultado === "pendente") pendentes++;
+        if (a.resultado !== "pendente" && a.resultado !== "void") {
+          bancaAcum = parseFloat((bancaAcum + calcularLucro(a, bancaAcum)).toFixed(2));
+          if (a.resultado === "green") greens++;
+          if (a.resultado === "red") reds++;
+        }
+      }
+      return {
+        id: p.id, nome: p.nome, moeda: p.moeda || "BRL", banca_inicial: bancaInicial, created_at: p.created_at,
+        totalApostas: lista.length, resolvidas: greens + reds, greens, reds, pendentes,
+        bancaAtual: bancaAcum, lucroTotal: parseFloat((bancaAcum - bancaInicial).toFixed(2)),
+      };
+    });
+    setUsuarios(relatorio);
+    setLoadingUsuarios(false);
+  }
+
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
@@ -723,6 +779,7 @@ export default function TipsterPainel() {
                 </button>
               )}
               {isAdmin && <button onClick={gerarRelatorio} style={{ padding:"6px 14px", borderRadius:8, border:"none", background:T.blue, color:"white", fontSize:12, fontWeight:700, cursor:"pointer" }}>📊 Relatório</button>}
+              {isAdmin && <button onClick={() => { setAba("usuarios"); carregarUsuarios(); }} style={{ padding:"6px 14px", borderRadius:8, border:`1px solid ${T.border}`, background:"transparent", color:T.text, fontSize:12, fontWeight:700, cursor:"pointer" }}>👥 Usuários</button>}
               <button onClick={() => setDark(!dark)} style={{ width:36, height:36, borderRadius:8, border:`1px solid ${T.border}`, background:"transparent", color:T.muted, cursor:"pointer", fontSize:16, display:"flex", alignItems:"center", justifyContent:"center" }}>
                 {dark ? "☀️" : "🌙"}
               </button>
@@ -1542,6 +1599,50 @@ export default function TipsterPainel() {
                       Visualizar
                     </button>
                   )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* ── ABA USUÁRIOS (admin) ── */}
+          {aba === "usuarios" && isAdmin && (
+            <div style={{ display:"flex", flexDirection:"column", gap:10, animation:"fadeIn 0.3s ease" }}>
+              <p style={{ fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:1.5, color:T.muted }}>Usuários cadastrados ({usuarios.length})</p>
+              {loadingUsuarios && (
+                <div style={{ textAlign:"center", padding:"60px 0", color:T.muted }}>
+                  <p style={{ fontSize:14 }}>Carregando...</p>
+                </div>
+              )}
+              {!loadingUsuarios && usuarios.length === 0 && (
+                <div style={{ textAlign:"center", padding:"60px 0", color:T.muted }}>
+                  <p style={{ fontSize:32, marginBottom:8 }}>👥</p>
+                  <p style={{ fontSize:14 }}>Nenhum usuário cadastrado ainda.</p>
+                </div>
+              )}
+              {!loadingUsuarios && usuarios.map(u => (
+                <div key={u.id} style={{ borderRadius:12, padding:"14px 16px", background:T.bgCard, border:`1px solid ${T.border}` }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:8, marginBottom:10 }}>
+                    <div>
+                      <p style={{ fontSize:14, fontWeight:800, color:T.text }}>{u.nome || "(sem nome)"}</p>
+                      <p style={{ fontSize:11, color:T.muted }}>Cadastrado em {new Date(u.created_at).toLocaleDateString("pt-BR")}</p>
+                    </div>
+                    <span style={{ fontSize:11, fontWeight:700, padding:"3px 10px", borderRadius:100, background:`${T.blue}18`, color:T.blue }}>{u.moeda}</span>
+                  </div>
+                  <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(110px, 1fr))", gap:8 }}>
+                    {[
+                      { label:"Banca inicial", valor:fmtBRL(u.banca_inicial, u.moeda) },
+                      { label:"Banca atual", valor:fmtBRL(u.bancaAtual, u.moeda), cor: u.lucroTotal >= 0 ? T.green : T.red },
+                      { label:"Lucro", valor:(u.lucroTotal>=0?"+":"") + fmtBRL(u.lucroTotal, u.moeda), cor: u.lucroTotal >= 0 ? T.green : T.red },
+                      { label:"Apostas", valor:String(u.totalApostas) },
+                      { label:"Resolvidas", valor:`${u.resolvidas} (${u.greens}G ${u.reds}R)` },
+                      { label:"Pendentes", valor:String(u.pendentes) },
+                    ].map((c,i) => (
+                      <div key={i} style={{ padding:"6px 10px", borderRadius:8, background:T.bg, border:`1px solid ${T.border}` }}>
+                        <span style={{ fontSize:9, color:T.muted, display:"block", marginBottom:1, textTransform:"uppercase", letterSpacing:0.5 }}>{c.label}</span>
+                        <span style={{ fontSize:12, fontWeight:700, color:c.cor || T.text }}>{c.valor}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               ))}
             </div>
