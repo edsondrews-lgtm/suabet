@@ -267,6 +267,12 @@ export default function TipsterPainel() {
     setLoginLoading(false);
   };
 
+  function abrirEditarPerfil() {
+    setMenuLogin(false);
+    setFormProfile({ nome: userProfile?.nome || "", banca: String(userProfile?.banca_inicial || 1000), moeda: userProfile?.moeda || "BRL" });
+    setEditProfileMode(true);
+  }
+
   const salvarEditProfile = async () => {
     if (!userLogado) return;
     const { error } = await supabase.from("user_profiles").upsert({
@@ -764,7 +770,13 @@ export default function TipsterPainel() {
               <div style={{ width:32, height:32, borderRadius:8, background:`linear-gradient(135deg, ${T.blue}, #8B5CF6)`, display:"flex", alignItems:"center", justifyContent:"center" }}>
                 <span style={{ fontSize:16 }}>⚡</span>
               </div>
-              <span style={{ fontWeight:800, fontSize:15, color:T.text, letterSpacing:-0.5 }}>Master Tipster</span>
+              {userLogado ? (
+                userProfile?.nome
+                  ? <span style={{ fontWeight:800, fontSize:15, color:T.text, letterSpacing:-0.5 }}>Olá, {userProfile.nome}</span>
+                  : <span onClick={abrirEditarPerfil} style={{ fontWeight:800, fontSize:15, color:T.blue, letterSpacing:-0.5, cursor:"pointer", textDecoration:"underline" }}>+ Adicionar seu nome</span>
+              ) : (
+                <span style={{ fontWeight:800, fontSize:15, color:T.text, letterSpacing:-0.5 }}>Master Tipster</span>
+              )}
             </div>
             <div className="nav-actions" style={{ display:"flex", gap:8, alignItems:"center" }}>
               <button className="nav-btn-text" onClick={() => carregar()} style={{ padding:"6px 14px", borderRadius:8, border:`1px solid ${T.border}`, background:"transparent", color:T.muted, fontSize:12, fontWeight:600, cursor:"pointer" }}>↻ Atualizar</button>
@@ -784,8 +796,8 @@ export default function TipsterPainel() {
                 {dark ? "☀️" : "🌙"}
               </button>
               <div style={{ position:"relative" }}>
-                <button onClick={() => setMenuLogin(!menuLogin)} style={{ padding:"6px 14px", borderRadius:8, border:`1px solid ${T.border}`, background: isAdmin ? T.green+"20" : "transparent", color: isAdmin ? T.green : T.muted, fontSize:12, fontWeight:600, cursor:"pointer" }}>
-                  {isAdmin ? "● Admin" : "🔑 Login"}
+                <button onClick={() => setMenuLogin(!menuLogin)} style={{ padding:"6px 14px", borderRadius:8, border:`1px solid ${T.border}`, background: isAdmin ? T.green+"20" : userLogado ? T.blue+"20" : "transparent", color: isAdmin ? T.green : userLogado ? T.blue : T.muted, fontSize:12, fontWeight:600, cursor:"pointer", maxWidth:140, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                  {isAdmin ? "● Admin" : userLogado ? `👤 ${userProfile?.nome || "Definir nome"}` : "🔑 Login"}
                 </button>
                 {menuLogin && (
                   <div style={{ position:"absolute", right:0, top:44, background:T.bgCard, border:`1px solid ${T.border}`, borderRadius:12, padding:16, width:280, zIndex:100, boxShadow:"0 8px 32px rgba(0,0,0,0.4)" }}>
@@ -794,7 +806,7 @@ export default function TipsterPainel() {
                         <p style={{ color:T.text, fontSize:13, marginBottom:4 }}>Logado como</p>
                         <p style={{ color:T.text, fontSize:15, marginBottom:12, fontWeight:700 }}>{userProfile?.nome || userLogado.email}</p>
                         <p style={{ color:T.muted, fontSize:12, marginBottom:12 }}>{userLogado.email}</p>
-                        <button onClick={() => { setMenuLogin(false); setFormProfile({ nome: userProfile?.nome || "", banca: String(userProfile?.banca_inicial || 1000), moeda: userProfile?.moeda || "BRL" }); setEditProfileMode(true); }} style={{ width:"100%", padding:10, borderRadius:8, border:`1px solid ${T.border}`, background:"transparent", color:T.text, fontSize:13, fontWeight:600, cursor:"pointer", marginBottom:8 }}>✏️ Meu perfil</button>
+                        <button onClick={abrirEditarPerfil} style={{ width:"100%", padding:10, borderRadius:8, border:`1px solid ${T.border}`, background:"transparent", color:T.text, fontSize:13, fontWeight:600, cursor:"pointer", marginBottom:8 }}>✏️ Meu perfil</button>
                         <button onClick={async () => {
                           if (!userLogado) return;
                           const { data: existing } = await supabase.from("telegram_vinculos").select("chat_id").eq("user_id", userLogado.id).maybeSingle();
