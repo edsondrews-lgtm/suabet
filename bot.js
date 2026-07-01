@@ -62,6 +62,11 @@ bot.on("message", async (msg) => {
   const caption = msg.caption || "";
   const texto = msg.text || caption || null;
 
+  if (!msg.photo && !caption) {
+    await bot.sendMessage(chatId, `⚠️ Envie uma foto de bilhete para cadastrar.`);
+    return;
+  }
+
   let fotoFileId = null;
   let dadosExtraidos = null;
   let statusExtracao = "nao_processado";
