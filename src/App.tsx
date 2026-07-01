@@ -8,7 +8,8 @@ import {
 // ── Types ──
 type Resultado = "pendente" | "green" | "red" | "void";
 type Tipo = "simples" | "bonus";
-type Aba = "resumo" | "todas" | "pendentes" | "simples" | "duplas" | "triplas" | "combinadas" | "bonus" | "programacao" | "telegram";
+type Aba = "resumo" | "analise" | "todas" | "pendentes" | "simples" | "duplas" | "triplas" | "combinadas" | "bonus" | "programacao" | "telegram";
+type VisaoAnalise = "diario" | "semanal" | "mensal" | "anual";
 
 interface Detalhe {
   id: string; aposta_id: string; esporte: string; campeonato: string;
@@ -130,6 +131,10 @@ export default function TipsterPainel() {
   const [editMsgTexto, setEditMsgTexto] = useState("");
   const [editBilhete, setEditBilhete] = useState<DadosBilhete | null>(null);
   const [editMode, setEditMode] = useState(false);
+  const [visaoAnalise, setVisaoAnalise] = useState<VisaoAnalise>("mensal");
+  const [mesAnalise, setMesAnalise] = useState(() => new Date());
+  const [diaSelecionado, setDiaSelecionado] = useState<string | null>(null);
+  const [tooltipDia, setTooltipDia] = useState<{ x:number; y:number; data:string; valor:number; apostas:Aposta[] } | null>(null);
 
   const bancaMomentoRef = useRef<Record<string, number>>({});
   const T = dark ? DARK : LIGHT;
@@ -392,6 +397,47 @@ export default function TipsterPainel() {
   const listaSimples = [...todasOrdenadas].reverse();
   const listaBonus = [...bonus].reverse();
 
+  // ── Cálculos da Análise ──
+  const mesAtual = mesAnalise.getMonth();
+  const anoAtual = mesAnalise.getFullYear();
+  const apostasMes = apostasFiltro.filter(a => {
+    const d = new Date(a.data);
+    return d.getMonth() === mesAtual && d.getFullYear() === anoAtual;
+  });
+  const apostasMesResolvidas = apostasMes.filter(a => a.resultado !== "pendente" && a.resultado !== "void");
+  const lucroMes = apostasMesResolvidas.reduce((s, a) => s + lucroCalc(a), 0);
+  const diasComApostas = new Set(apostasMes.map(a => a.data)).size;
+  const mediaDiaria = diasComApostas > 0 ? lucroMes / diasComApostas : 0;
+  const taxaAcertoMes = apostasMesResolvidas.length > 0 ? (apostasMesResolvidas.filter(a => a.resultado === "green").length / apostasMesResolvidas.length * 100) : 0;
+  const lucroPorDiaMes: Record<string, number> = {};
+  apostasMesResolvidas.forEach(a => { lucroPorDiaMes[a.data] = (lucroPorDiaMes[a.data] ?? 0) + lucroCalc(a); });
+  const diasLucro = Object.entries(lucroPorDiaMes);
+  const melhorDiaMes = diasLucro.length > 0 ? diasLucro.reduce((a, b) => b[1] > a[1] ? b : a) : null;
+  const mesAnt = mesAtual === 0 ? 11 : mesAtual - 1;
+  const anoMesAnt = mesAtual === 0 ? anoAtual - 1 : anoAtual;
+  const lucroMesAnt = apostasFiltro.filter(a => { const d = new Date(a.data); return d.getMonth() === mesAnt && d.getFullYear() === anoMesAnt && a.resultado !== "pendente" && a.resultado !== "void"; }).reduce((s, a) => s + lucroCalc(a), 0);
+  const comparacaoMes = lucroMesAnt !== 0 ? ((lucroMes - lucroMesAnt) / Math.abs(lucroMesAnt) * 100) : null;
+  let streakDias = 0, streakTipoCalc: "green" | "red" | null = null;
+  const hoje = new Date().toISOString().split("T")[0];
+  const datasOrdenadas = [...new Set(apostasFiltro.filter(a => a.resultado !== "pendente" && a.resultado !== "void").map(a => a.data))].sort();
+  for (let i = datasOrdenadas.length - 1; i >= 0; i--) {
+    const diaLucro = apostasFiltro.filter(a => a.data === datasOrdenadas[i] && a.resultado !== "pendente" && a.resultado !== "void").reduce((s, a) => s + lucroCalc(a), 0);
+    const tipo = diaLucro >= 0 ? "green" : "red";
+    if (streakTipoCalc === null) streakTipoCalc = tipo;
+    if (tipo === streakTipoCalc) streakDias++; else break;
+  }
+  const dadosGraficoMes = (() => {
+    const arr: { data: string; banca: number }[] = [];
+    let acum = BANCA_INICIAL;
+    const diasMes = new Date(anoAtual, mesAtual + 1, 0).getDate();
+    for (let d = 1; d <= diasMes; d++) {
+      const chave = `${anoAtual}-${String(mesAtual+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+      if (lucroPorDiaMes[chave] !== undefined) acum = parseFloat((acum + lucroPorDiaMes[chave]).toFixed(2));
+      arr.push({ data: `${String(d).padStart(2,"0")}/${String(mesAtual+1).padStart(2,"0")}`, banca: acum });
+    }
+    return arr;
+  })();
+
   // ── Gerar Relatório ──
   async function gerarRelatorio() {
     setGerandoRelatorio(true); setTextoRelatorio(""); setModalRelatorio(true);
@@ -427,8 +473,6 @@ export default function TipsterPainel() {
     } catch (err: any) { setTextoRelatorio(`Erro: ${err.message}`); }
     finally { setGerandoRelatorio(false); }
   }
-
-  // ── CSS global ──
   const globalCSS = `
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { background: ${T.bg}; color: ${T.text}; font-family: 'Inter', system-ui, sans-serif; transition: background 0.3s, color 0.3s; }
@@ -437,6 +481,10 @@ export default function TipsterPainel() {
     ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: ${T.bg}; } ::-webkit-scrollbar-thumb { background: ${T.border}; border-radius: 3px; }
     select, input { background: ${T.bgCard}; color: ${T.text}; border: 1px solid ${T.border}; border-radius: 10px; padding: 10px 12px; font-size: 14px; outline: none; width: 100%; }
     select:focus, input:focus { border-color: ${T.blue}; }
+    .cal-cell { transition: transform 0.15s, box-shadow 0.15s; cursor: pointer; }
+    .cal-cell:hover { transform: scale(1.15); z-index:2; }
+    .pill-active { background: ${T.blue} !important; color: white !important; }
+    @media(max-width:600px) { .analise-cards { grid-template-columns: 1fr 1fr !important; } .analise-layout { flex-direction: column !important; } .analise-side { width:100% !important; max-height:40vh; overflow-y:auto; } }
   `;
 
   if (loading) return (
@@ -451,6 +499,7 @@ export default function TipsterPainel() {
 
   const abasMapa: { key: Aba; label: string; count?: number }[] = [
     { key:"resumo", label:"Resumo" },
+    { key:"analise", label:"Análise" },
     { key:"todas", label:"Todas", count:apostas.length },
     { key:"pendentes", label:"Pendentes", count:pendentes.length },
     { key:"simples", label:"Simples", count:simplesUm.length },
@@ -738,6 +787,179 @@ export default function TipsterPainel() {
                   </div>
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* ── ABA ANÁLISE ── */}
+          {aba === "analise" && (
+            <div style={{ animation:"fadeIn 0.3s ease" }}>
+              {/* Toggle Diário/Semanal/Mensal/Anual */}
+              <div style={{ display:"flex", gap:6, marginBottom:16, flexWrap:"wrap" }}>
+                {(["diario","semanal","mensal","anual"] as VisaoAnalise[]).map(v => (
+                  <button key={v} onClick={() => setVisaoAnalise(v)}
+                    className={visaoAnalise === v ? "pill-active" : ""}
+                    style={{ padding:"8px 18px", borderRadius:100, border:`1px solid ${visaoAnalise === v ? T.blue : T.border}`, background: visaoAnalise === v ? T.blue : "transparent", color: visaoAnalise === v ? "white" : T.muted, fontSize:12, fontWeight:700, cursor:"pointer", textTransform:"capitalize" }}>
+                    {v === "diario" ? "Dia" : v === "semanal" ? "Semana" : v === "mensal" ? "Mês" : "Ano"}
+                  </button>
+                ))}
+              </div>
+
+              {/* Navegação de mês */}
+              <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:16, marginBottom:16 }}>
+                <button onClick={() => setMesAnalise(new Date(anoAtual, mesAtual - 1))} style={{ background:"none", border:"none", cursor:"pointer", color:T.muted, fontSize:20, padding:4 }}>◀</button>
+                <span style={{ fontSize:16, fontWeight:800, color:T.text, minWidth:160, textAlign:"center" }}>
+                  {mesAnalise.toLocaleDateString("pt-BR", { month:"long", year:"numeric" })}
+                </span>
+                <button onClick={() => setMesAnalise(new Date(anoAtual, mesAtual + 1))} style={{ background:"none", border:"none", cursor:"pointer", color:T.muted, fontSize:20, padding:4 }}>▶</button>
+              </div>
+
+              {/* Cards de resumo */}
+              <div className="analise-cards" style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:10, marginBottom:16 }}>
+                <div style={{ padding:"14px", borderRadius:12, background:T.bgCard, border:`1px solid ${T.border}` }}>
+                  <p style={{ fontSize:10, fontWeight:700, color:T.muted, textTransform:"uppercase", letterSpacing:1 }}>Faturamento</p>
+                  <p style={{ fontSize:20, fontWeight:800, color: lucroMes >= 0 ? T.green : T.red, marginTop:4 }}>
+                    {lucroMes >= 0 ? "+" : ""}{fmtBRL(lucroMes)}
+                  </p>
+                  {comparacaoMes !== null && (
+                    <p style={{ fontSize:11, color: comparacaoMes >= 0 ? T.green : T.red, marginTop:2 }}>
+                      {comparacaoMes >= 0 ? "↑" : "↓"} {Math.abs(comparacaoMes).toFixed(0)}% vs mês anterior
+                    </p>
+                  )}
+                </div>
+                <div style={{ padding:"14px", borderRadius:12, background:T.bgCard, border:`1px solid ${T.border}` }}>
+                  <p style={{ fontSize:10, fontWeight:700, color:T.muted, textTransform:"uppercase", letterSpacing:1 }}>Média/dia</p>
+                  <p style={{ fontSize:20, fontWeight:800, color: mediaDiaria >= 0 ? T.green : T.red, marginTop:4 }}>
+                    {mediaDiaria >= 0 ? "+" : ""}{fmtBRL(mediaDiaria)}
+                  </p>
+                  <p style={{ fontSize:11, color:T.muted, marginTop:2 }}>{diasComApostas} dias</p>
+                </div>
+                <div style={{ padding:"14px", borderRadius:12, background:T.bgCard, border:`1px solid ${T.border}` }}>
+                  <p style={{ fontSize:10, fontWeight:700, color:T.muted, textTransform:"uppercase", letterSpacing:1 }}>Acerto</p>
+                  <p style={{ fontSize:20, fontWeight:800, color:T.text, marginTop:4 }}>{taxaAcertoMes.toFixed(0)}%</p>
+                  <p style={{ fontSize:11, color:T.muted, marginTop:2 }}>{apostasMesResolvidas.filter(a=>a.resultado==="green").length}W / {apostasMesResolvidas.filter(a=>a.resultado==="red").length}L</p>
+                </div>
+                <div style={{ padding:"14px", borderRadius:12, background:T.bgCard, border:`1px solid ${T.border}` }}>
+                  <p style={{ fontSize:10, fontWeight:700, color:T.muted, textTransform:"uppercase", letterSpacing:1 }}>Streak</p>
+                  <p style={{ fontSize:20, fontWeight:800, color: streakTipoCalc === "green" ? T.green : streakTipoCalc === "red" ? T.red : T.muted, marginTop:4 }}>
+                    {streakDias > 0 ? `${streakDias} dias ${streakTipoCalc === "green" ? "🟢" : "🔴"}` : "—"}
+                  </p>
+                  <p style={{ fontSize:11, color:T.muted, marginTop:2 }}>
+                    {melhorDiaMes ? `Melhor: ${fmtBRL(melhorDiaMes[1])}` : "—"}
+                  </p>
+                </div>
+              </div>
+
+              {/* Gráfico de evolução mensal */}
+              <div style={{ padding:"16px", borderRadius:14, background:T.bgCard, border:`1px solid ${T.border}`, marginBottom:16 }}>
+                <p style={{ fontSize:12, fontWeight:700, color:T.muted, textTransform:"uppercase", letterSpacing:1, marginBottom:8 }}>Evolução da Banca</p>
+                <ResponsiveContainer width="100%" height={180}>
+                  <AreaChart data={dadosGraficoMes}>
+                    <defs>
+                      <linearGradient id="gAnalise" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor={lucroMes >= 0 ? T.green : T.red} stopOpacity={0.3}/>
+                        <stop offset="95%" stopColor={lucroMes >= 0 ? T.green : T.red} stopOpacity={0}/>
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke={T.border} />
+                    <XAxis dataKey="data" tick={{ fontSize:10, fill:T.muted }} interval={6} />
+                    <YAxis tick={{ fontSize:10, fill:T.muted }} tickFormatter={v => `R$${v}`} width={60} />
+                    <ReferenceLine y={BANCA_INICIAL} stroke={T.muted} strokeDasharray="4 4" />
+                    <Tooltip contentStyle={{ background:T.bgCard, border:`1px solid ${T.border}`, borderRadius:10, fontSize:12, color:T.text }} formatter={(v) => [`R$ ${Number(v).toFixed(2)}`, "Banca"]} />
+                    <Area type="monotone" dataKey="banca" stroke={lucroMes >= 0 ? T.green : T.red} fill="url(#gAnalise)" strokeWidth={2} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+
+              <div className="analise-layout" style={{ display:"flex", gap:16 }}>
+                {/* Calendário heatmap */}
+                <div style={{ flex:1 }}>
+                  <p style={{ fontSize:12, fontWeight:700, color:T.muted, textTransform:"uppercase", letterSpacing:1, marginBottom:8 }}>Calendário</p>
+                  <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:4 }}>
+                    {["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"].map(d => (
+                      <div key={d} style={{ textAlign:"center", fontSize:10, fontWeight:700, color:T.muted, padding:4 }}>{d}</div>
+                    ))}
+                    {(() => {
+                      const primeiroDia = new Date(anoAtual, mesAtual, 1).getDay();
+                      const diasNoMes = new Date(anoAtual, mesAtual + 1, 0).getDate();
+                      const cells: React.ReactNode[] = [];
+                      for (let i = 0; i < primeiroDia; i++) cells.push(<div key={`empty-${i}`} />);
+                      for (let d = 1; d <= diasNoMes; d++) {
+                        const chave = `${anoAtual}-${String(mesAtual+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+                        const lucro = lucroPorDiaMes[chave] ?? null;
+                        const ehHoje = chave === hoje;
+                        const apostasDia = apostasFiltro.filter(a => a.data === chave);
+                        const maxLucro = diasLucro.length > 0 ? Math.max(...diasLucro.map(([,v]) => Math.abs(v)), 1) : 1;
+                        let bg = T.border;
+                        if (lucro !== null) {
+                          const intensidade = Math.min(Math.abs(lucro) / maxLucro, 1);
+                          bg = lucro >= 0
+                            ? `rgba(34,197,94,${0.15 + intensidade * 0.6})`
+                            : `rgba(239,68,68,${0.15 + intensidade * 0.6})`;
+                        }
+                        cells.push(
+                          <div key={d} className="cal-cell"
+                            onClick={() => setDiaSelecionado(diaSelecionado === chave ? null : chave)}
+                            onMouseEnter={(e) => { if (lucro !== null) { const r = e.currentTarget.getBoundingClientRect(); setTooltipDia({ x:r.left + r.width/2, y:r.top - 8, data:chave, valor:lucro, apostas:apostasDia }); }}}
+                            onMouseLeave={() => setTooltipDia(null)}
+                            style={{ aspectRatio:"1", borderRadius:8, background:bg, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", border: ehHoje ? `2px solid ${T.blue}` : diaSelecionado === chave ? `2px solid ${T.text}` : "2px solid transparent", position:"relative" }}>
+                            <span style={{ fontSize:11, fontWeight:700, color:T.text }}>{d}</span>
+                            {lucro !== null && <span style={{ fontSize:8, fontWeight:600, color: lucro >= 0 ? "#22c55e" : "#ef4444" }}>{lucro >= 0 ? "+" : ""}{lucro.toFixed(0)}</span>}
+                          </div>
+                        );
+                      }
+                      return cells;
+                    })()}
+                  </div>
+                </div>
+
+                {/* Painel lateral - detalhe do dia */}
+                <div className="analise-side" style={{ width:280, flexShrink:0 }}>
+                  {diaSelecionado ? (() => {
+                    const apostasDia = apostasFiltro.filter(a => a.data === diaSelecionado);
+                    const lucroDia = apostasDia.filter(a => a.resultado !== "pendente" && a.resultado !== "void").reduce((s, a) => s + lucroCalc(a), 0);
+                    return (
+                      <div style={{ padding:"16px", borderRadius:14, background:T.bgCard, border:`1px solid ${T.border}`, animation:"fadeIn 0.2s ease" }}>
+                        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 }}>
+                          <p style={{ fontSize:14, fontWeight:800, color:T.text }}>
+                            {new Date(diaSelecionado + "T12:00:00").toLocaleDateString("pt-BR", { weekday:"short", day:"2-digit", month:"short" })}
+                          </p>
+                          <button onClick={() => setDiaSelecionado(null)} style={{ background:"none", border:"none", cursor:"pointer", color:T.muted, fontSize:16 }}>✕</button>
+                        </div>
+                        <p style={{ fontSize:18, fontWeight:800, color: lucroDia >= 0 ? T.green : T.red, marginBottom:12 }}>
+                          {lucroDia >= 0 ? "+" : ""}{fmtBRL(lucroDia)}
+                        </p>
+                        {apostasDia.map(a => (
+                          <div key={a.id} style={{ padding:"8px 10px", borderRadius:8, background:T.bg, border:`1px solid ${T.border}`, marginBottom:6 }}>
+                            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                              <span style={{ fontSize:12, fontWeight:600, color:T.text }}>{a.casa_aposta}</span>
+                              <ResultadoBadge resultado={a.resultado} T={T} />
+                            </div>
+                            <p style={{ fontSize:11, color:T.muted, marginTop:2 }}>
+                              @{a.odd_total} · {a.stake_unidades ?? "?"}u · {a.tipo}
+                            </p>
+                            {a.detalhes?.map(d => (
+                              <p key={d.id} style={{ fontSize:10, color:T.subtle, marginTop:2 }}>→ {d.selecao} ({d.odd_parcial})</p>
+                            ))}
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })() : (
+                    <div style={{ padding:"16px", borderRadius:14, background:T.bgCard, border:`1px solid ${T.border}`, textAlign:"center" }}>
+                      <p style={{ fontSize:13, color:T.muted }}>Selecione um dia</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Tooltip */}
+              {tooltipDia && (
+                <div style={{ position:"fixed", left:tooltipDia.x, top:tooltipDia.y, transform:"translate(-50%,-100%)", background:T.bgCard, border:`1px solid ${T.border}`, borderRadius:8, padding:"8px 12px", fontSize:12, color:T.text, zIndex:999, pointerEvents:"none", boxShadow:"0 4px 12px rgba(0,0,0,0.3)" }}>
+                  <p style={{ fontWeight:700 }}>{new Date(tooltipDia.data+"T12:00:00").toLocaleDateString("pt-BR",{day:"2-digit",month:"short"})}</p>
+                  <p style={{ color: tooltipDia.valor >= 0 ? T.green : T.red, fontWeight:800 }}>{tooltipDia.valor >= 0 ? "+" : ""}{fmtBRL(tooltipDia.valor)}</p>
+                  <p style={{ color:T.muted, fontSize:11 }}>{tooltipDia.apostas.length} aposta(s)</p>
+                </div>
+              )}
             </div>
           )}
 
