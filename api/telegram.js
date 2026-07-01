@@ -28,6 +28,29 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true });
     }
 
+    // /vincular CÓDIGO
+    if (msg.text?.startsWith("/vincular ")) {
+      const code = msg.text.replace("/vincular ", "").trim().toUpperCase();
+      const { data: profile } = await supabase.from("user_profiles").select("id").eq("pending_code", code).single();
+      let text;
+      if (!profile?.id) {
+        text = "❌ Código inválido ou expirado.\nGere um novo código no painel web.";
+      } else {
+        const { error: vincError } = await supabase.from("telegram_vinculos").upsert({ chat_id: chatId, user_id: profile.id }, { onConflict: "chat_id" });
+        if (vincError) {
+          text = `❌ Erro ao vincular: ${vincError.message}`;
+        } else {
+          await supabase.from("user_profiles").update({ pending_code: null }).eq("id", profile.id);
+          text = "✅ Telegram vinculado com sucesso!\nAgora mande fotos de bilhete para cadastrar.";
+        }
+      }
+      await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: chatId, text }),
+      });
+      return res.status(200).json({ ok: true });
+    }
+
     // Find user by chat_id
     const { data: vinculo } = await supabase.from("telegram_vinculos").select("user_id").eq("chat_id", chatId).single();
     const userId = vinculo?.user_id || null;
