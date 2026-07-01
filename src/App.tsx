@@ -21,7 +21,7 @@ interface Aposta {
   banca_momento: number | null; valor_bonus: number | null; lucro_maximo: number | null;
   casa_aposta: string; odd_total: number; resultado: Resultado;
   lucro_reais: number | null; observacao: string | null; created_at: string;
-  user_id: string | null;
+  user_id: string | null; origem: string | null;
   detalhes?: Detalhe[];
 }
 interface UserProfile {
@@ -31,7 +31,7 @@ interface UserProfile {
 interface UsuarioRelatorio {
   id: string; nome: string | null; moeda: string; banca_inicial: number; created_at: string;
   totalApostas: number; resolvidas: number; greens: number; reds: number; pendentes: number;
-  bancaAtual: number; lucroTotal: number;
+  bancaAtual: number; lucroTotal: number; viaTelegram: number; viaManual: number;
 }
 interface Programacao {
   id: string; casa: string; dia_semana: string; valor: number;
@@ -409,7 +409,7 @@ export default function TipsterPainel() {
       await supabase.from("tipster_apostas_detalhes").insert(legsPayload(formAposta.id));
     } else {
       const { data: ins, error } = await supabase.from("tipster_apostas")
-        .insert({ ...payload, banca_momento: bancaAtual, user_id: userLogado.id }).select("id").single();
+        .insert({ ...payload, origem: "manual", banca_momento: bancaAtual, user_id: userLogado.id }).select("id").single();
       if (error || !ins) { alert("Erro ao salvar: " + (error?.message ?? "desconhecido")); setSalvandoAposta(false); return; }
       await supabase.from("tipster_apostas_detalhes").insert(legsPayload(ins.id));
     }
@@ -433,6 +433,7 @@ export default function TipsterPainel() {
         resultado: "pendente",
         observacao: editMsgTexto || null,
         user_id: userLogado?.id || null,
+        origem: "telegram",
       }).select("id").single();
       if (err1 || !apostaInsert) { console.error("Erro ao salvar aposta:", err1); alert("Erro ao salvar: " + (err1?.message ?? "desconhecido")); return; }
       const legs = (editBilhete.pernas || []).map(p => ({
@@ -506,6 +507,8 @@ export default function TipsterPainel() {
         id: p.id, nome: p.nome, moeda: p.moeda || "BRL", banca_inicial: bancaInicial, created_at: p.created_at,
         totalApostas: lista.length, resolvidas: greens + reds, greens, reds, pendentes,
         bancaAtual: bancaAcum, lucroTotal: parseFloat((bancaAcum - bancaInicial).toFixed(2)),
+        viaTelegram: lista.filter(a => a.origem === "telegram").length,
+        viaManual: lista.filter(a => a.origem === "manual").length,
       };
     });
     setUsuarios(relatorio);
@@ -1648,6 +1651,7 @@ export default function TipsterPainel() {
                       { label:"Apostas", valor:String(u.totalApostas) },
                       { label:"Resolvidas", valor:`${u.resolvidas} (${u.greens}G ${u.reds}R)` },
                       { label:"Pendentes", valor:String(u.pendentes) },
+                      { label:"Origem", valor:`✈️ ${u.viaTelegram} · ✍️ ${u.viaManual}` },
                     ].map((c,i) => (
                       <div key={i} style={{ padding:"6px 10px", borderRadius:8, background:T.bg, border:`1px solid ${T.border}` }}>
                         <span style={{ fontSize:9, color:T.muted, display:"block", marginBottom:1, textTransform:"uppercase", letterSpacing:0.5 }}>{c.label}</span>
@@ -1983,7 +1987,11 @@ function CardAposta({ aposta, bancaMomentoCalc, expandido, setExpandido, editand
 
         {/* Casa + tipo */}
         <div style={{ flexShrink:0, minWidth:76 }}>
-          <p style={{ fontSize:12, fontWeight:600, color:T.text }}>{aposta.casa_aposta}</p>
+          <p style={{ fontSize:12, fontWeight:600, color:T.text, display:"flex", alignItems:"center", gap:4 }}>
+            {aposta.casa_aposta}
+            {aposta.origem === "telegram" && <span title="Cadastrado via Telegram">✈️</span>}
+            {aposta.origem === "manual" && <span title="Cadastrado manualmente">✍️</span>}
+          </p>
           <span style={{ fontSize:9, padding:"2px 6px", borderRadius:4, fontWeight:700, background:`${tipoCor}18`, color:tipoCor }}>
             {isBonus ? "BÔNUS" : tipoLabel.toUpperCase()}
           </span>
