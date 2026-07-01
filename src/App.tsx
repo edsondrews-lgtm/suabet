@@ -62,8 +62,10 @@ function calcularLucro(a: Aposta, bancaBase?: number): number {
     ? parseFloat((stake * (a.odd_total - 1)).toFixed(2))
     : parseFloat((-stake).toFixed(2));
 }
-function fmtBRL(v: number) {
-  return "R$ " + Math.abs(v).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const MOEDA_SYMBOLS: Record<string, string> = { BRL: "R$", USD: "$", EUR: "€" };
+function fmtBRL(v: number, moeda?: string) {
+  const sym = MOEDA_SYMBOLS[moeda || "BRL"] || "R$";
+  return sym + " " + Math.abs(v).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 function fmtDataCurta(d: string) {
   return new Date(d + "T00:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
@@ -146,14 +148,16 @@ export default function TipsterPainel() {
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [formProfile, setFormProfile] = useState({ nome: "", banca: "1000", moeda: "BRL" });
   const [userLogado, setUserLogado] = useState<any>(null);
-  const [adminViewUser, setAdminViewUser] = useState<string | null>(null);
-  const [usuarios, setUsuarios] = useState<{ id: string; nome: string }[]>([]);
   const [telaCadastro, setTelaCadastro] = useState(false);
   const [cadastroPass2, setCadastroPass2] = useState("");
+  const [editProfileMode, setEditProfileMode] = useState(false);
+  const [telegramVinculado, setTelegramVinculado] = useState(false);
 
   const bancaMomentoRef = useRef<Record<string, number>>({});
   const T = dark ? DARK : LIGHT;
   const BANCA_INICIAL = userProfile?.banca_inicial ?? BANCA_INICIAL_DEFAULT;
+  const MOEDA = userProfile?.moeda || "BRL";
+  const fmt = (v: number) => fmtBRL(v, MOEDA);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -169,18 +173,14 @@ export default function TipsterPainel() {
   async function aoLogar(user: any) {
     setUserLogado(user);
     const { data: profile } = await supabase.from("user_profiles").select("*").eq("id", user.id).single();
+    const isAdm = profile?.role === "admin";
     if (profile) {
       setUserProfile(profile as UserProfile);
-      setIsAdmin(profile.role === "admin");
+      setIsAdmin(isAdm);
     }
-    carregar(user.id);
-  }
-
-  async function vincularTelegram() {
-    if (!userLogado) return;
-    const { data: existing } = await supabase.from("telegram_vinculos").select("chat_id").eq("user_id", userLogado.id).single();
-    if (existing) { alert("Telegram já vinculado!"); return; }
-    alert("Mande /start no bot do Telegram para vincular. O bot vai detectar seu chat_id automaticamente quando você mandar a primeira mensagem.");
+    const { data: vinc } = await supabase.from("telegram_vinculos").select("chat_id").eq("user_id", user.id).maybeSingle();
+    setTelegramVinculado(!!vinc?.chat_id);
+    await carregar(user.id, isAdm);
   }
 
   const ADMIN_EMAIL_MAP: Record<string, string> = { "edsondrews": "edsondrews@hotmail.com" };
@@ -193,12 +193,7 @@ export default function TipsterPainel() {
     if (error) setLoginErro(error.message === "Invalid login credentials" ? "Usuário ou senha inválidos" : error.message);
     else {
       setMenuLogin(false); setLoginEmail(""); setLoginPass("");
-      if (data?.user) {
-        setUserLogado(data.user);
-        const isAdminUser = ADMIN_EMAIL_MAP[loginEmail.trim().toLowerCase()] !== undefined;
-        setIsAdmin(isAdminUser);
-        if (isAdminUser) await carregarUsuarios();
-      }
+      if (data?.user) await aoLogar(data.user);
     }
     setLoginLoading(false);
   }
@@ -230,6 +225,21 @@ export default function TipsterPainel() {
     setLoginLoading(false);
   };
 
+  const salvarEditProfile = async () => {
+    if (!userLogado) return;
+    const { error } = await supabase.from("user_profiles").upsert({
+      id: userLogado.id,
+      nome: formProfile.nome || userProfile?.nome || "",
+      banca_inicial: parseFloat(formProfile.banca) || userProfile?.banca_inicial || 1000,
+      moeda: formProfile.moeda || userProfile?.moeda || "BRL",
+    });
+    if (error) { alert("Erro ao salvar: " + error.message); return; }
+    const { data } = await supabase.from("user_profiles").select("*").eq("id", userLogado.id).single();
+    setUserProfile(data as UserProfile);
+    setEditProfileMode(false);
+    carregar(userLogado.id);
+  };
+
   function exportarBackup() {
     const dados = {
       exportado_em: new Date().toISOString(),
@@ -251,18 +261,12 @@ export default function TipsterPainel() {
     setMenuLogin(false);
     setUserLogado(null);
     setUserProfile(null);
-    setAdminViewUser(null);
-    setUsuarios([]);
   }
 
-  async function carregarUsuarios() {
-    const { data } = await supabase.from("user_profiles").select("id, nome");
-    setUsuarios((data ?? []) as { id: string; nome: string }[]);
-  }
-
-  async function carregarTelegram(userId?: string) {
+  async function carregarTelegram(userId?: string, isAdm?: boolean) {
+    const effectiveIsAdmin = isAdm ?? isAdmin;
     let query = supabase.from("telegram_messages").select("*").eq("status", "pendente").order("created_at", { ascending: false });
-    if (userId && !isAdmin) query = query.eq("user_id", userId);
+    if (userId && !effectiveIsAdmin) query = query.eq("user_id", userId);
     const { data } = await query;
     setTelegramMsgs((data ?? []) as TelegramMessage[]);
   }
@@ -306,9 +310,9 @@ export default function TipsterPainel() {
         odd_total: editBilhete.odd_total,
         resultado: "pendente",
         observacao: editMsgTexto || null,
-        user_id: msgSelecionada.user_id || userLogado?.id || null,
+        user_id: userLogado?.id || null,
       }).select("id").single();
-      if (err1 || !apostaInsert) { console.error("Erro ao salvar aposta:", err1); return; }
+      if (err1 || !apostaInsert) { console.error("Erro ao salvar aposta:", err1); alert("Erro ao salvar: " + (err1?.message ?? "desconhecido")); return; }
       const legs = (editBilhete.pernas || []).map(p => ({
         aposta_id: apostaInsert.id, esporte: p.esporte || "", campeonato: p.campeonato || "",
         jogo: p.jogo || "", mercado: p.mercado || "", selecao: p.selecao || "",
@@ -316,43 +320,42 @@ export default function TipsterPainel() {
       }));
       if (legs.length > 0) await supabase.from("tipster_apostas_detalhes").insert(legs);
       await supabase.from("telegram_messages").delete().eq("id", msgSelecionada.id);
+      setModalTelegram(false);
+      setMsgSelecionada(null);
       carregar();
     } else {
       await supabase.from("telegram_messages").update({
         status: "confirmado",
         texto: editMsgTexto || msgSelecionada.texto,
       }).eq("id", msgSelecionada.id);
+      setModalTelegram(false);
+      setMsgSelecionada(null);
+      carregarTelegram();
     }
-    setModalTelegram(false);
-    setMsgSelecionada(null);
-    carregarTelegram();
   }
 
-  async function carregar(userId?: string) {
+  async function carregar(userId?: string, isAdminOverride?: boolean) {
     setLoading(true);
     const effectiveUserId = userId || userLogado?.id || null;
+    const effectiveIsAdmin = isAdminOverride ?? isAdmin;
     let queryApostas = supabase.from("tipster_apostas").select("*").order("data",{ascending:true}).order("created_at",{ascending:true});
-    if (isAdmin && adminViewUser) queryApostas = queryApostas.eq("user_id", adminViewUser);
-    else if (effectiveUserId && !isAdmin) queryApostas = queryApostas.eq("user_id", effectiveUserId);
+    if (effectiveUserId && !effectiveIsAdmin) queryApostas = queryApostas.eq("user_id", effectiveUserId);
     const { data: ap } = await queryApostas;
     const { data: det } = await supabase.from("tipster_apostas_detalhes").select("*");
     const { data: prog } = await supabase.from("tipster_programacao").select("*").order("dia_semana");
     const com = (ap ?? []).map((a: Aposta) => ({ ...a, detalhes: (det ?? []).filter((d: Detalhe) => d.aposta_id === a.id) }));
     setApostas(com);
     setProgramacao((prog ?? []) as Programacao[]);
-    await carregarTelegram(effectiveUserId);
+    await carregarTelegram(effectiveUserId, effectiveIsAdmin);
     setLoading(false);
   }
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
-        setUserLogado(session.user);
-        const email = session.user.email ?? "";
-        const isAdminUser = Object.values(ADMIN_EMAIL_MAP).includes(email);
-        setIsAdmin(isAdminUser);
-        if (isAdminUser) carregarUsuarios();
+        aoLogar(session.user);
+      } else {
+        carregar();
       }
-      carregar();
     });
   }, []);
 
@@ -618,20 +621,6 @@ export default function TipsterPainel() {
                 </button>
               )}
               {isAdmin && <button onClick={gerarRelatorio} style={{ padding:"6px 14px", borderRadius:8, border:"none", background:T.blue, color:"white", fontSize:12, fontWeight:700, cursor:"pointer" }}>📊 Relatório</button>}
-              {isAdmin && usuarios.length > 0 && (
-                <select value={adminViewUser ?? ""} onChange={e => { setAdminViewUser(e.target.value || null); setTimeout(() => carregar(), 0); }} style={{ padding:"6px 10px", borderRadius:8, border:`1px solid ${T.border}`, background:T.bgCard, color:T.text, fontSize:12, fontWeight:600, cursor:"pointer" }}>
-                  <option value="">Todos os clientes</option>
-                  {usuarios.map(u => <option key={u.id} value={u.id}>{u.nome || u.id.slice(0,8)}</option>)}
-                </select>
-              )}
-              {!isAdmin && userProfile && (
-                <button onClick={vincularTelegram} style={{ padding:"6px 14px", borderRadius:8, border:`1px solid ${T.blue}`, background:"transparent", color:T.blue, fontSize:12, fontWeight:700, cursor:"pointer" }}>
-                  📱 Vincular Telegram
-                </button>
-              )}
-              {userProfile && (
-                <span style={{ fontSize:12, fontWeight:700, color:T.text }}>{userProfile.nome}</span>
-              )}
               <button onClick={() => setDark(!dark)} style={{ width:36, height:36, borderRadius:8, border:`1px solid ${T.border}`, background:"transparent", color:T.muted, cursor:"pointer", fontSize:16, display:"flex", alignItems:"center", justifyContent:"center" }}>
                 {dark ? "☀️" : "🌙"}
               </button>
@@ -641,9 +630,28 @@ export default function TipsterPainel() {
                 </button>
                 {menuLogin && (
                   <div style={{ position:"absolute", right:0, top:44, background:T.bgCard, border:`1px solid ${T.border}`, borderRadius:12, padding:16, width:280, zIndex:100, boxShadow:"0 8px 32px rgba(0,0,0,0.4)" }}>
-                    {isAdmin ? (
+                    {userLogado ? (
                       <div>
-                        <p style={{ color:T.text, fontSize:13, marginBottom:12 }}>Logado como <b>Admin</b></p>
+                        <p style={{ color:T.text, fontSize:13, marginBottom:4 }}>Logado como</p>
+                        <p style={{ color:T.text, fontSize:15, marginBottom:12, fontWeight:700 }}>{userProfile?.nome || userLogado.email}</p>
+                        <p style={{ color:T.muted, fontSize:12, marginBottom:12 }}>{userLogado.email}</p>
+                        <button onClick={() => { setMenuLogin(false); setFormProfile({ nome: userProfile?.nome || "", banca: String(userProfile?.banca_inicial || 1000), moeda: userProfile?.moeda || "BRL" }); setEditProfileMode(true); }} style={{ width:"100%", padding:10, borderRadius:8, border:`1px solid ${T.border}`, background:"transparent", color:T.text, fontSize:13, fontWeight:600, cursor:"pointer", marginBottom:8 }}>✏️ Meu perfil</button>
+                        <button onClick={async () => {
+                          if (!userLogado) return;
+                          const { data: existing } = await supabase.from("telegram_vinculos").select("chat_id").eq("user_id", userLogado.id).maybeSingle();
+                          if (existing?.chat_id) {
+                            if (!confirm("Desvincular Telegram? Você perderá a conexão com o bot.")) return;
+                            await supabase.from("telegram_vinculos").delete().eq("user_id", userLogado.id);
+                            setTelegramVinculado(false);
+                            alert("Telegram desvinculado!");
+                            return;
+                          }
+                          const code = Math.random().toString(36).substring(2, 8).toUpperCase();
+                          await supabase.from("user_profiles").update({ pending_code: code }).eq("id", userLogado.id);
+                          alert(`📱 Como vincular o Telegram:\n\n1. Abra o bot @gestorstakebot no Telegram\n2. Envie este comando:\n\n/vincular ${code}\n\nPronto! Depois é só mandar fotos de bilhete pelo bot.`);
+                        }} style={{ width:"100%", padding:10, borderRadius:8, border:`1px solid ${T.blue}`, background:"transparent", color:T.blue, fontSize:13, fontWeight:600, cursor:"pointer", marginBottom:8 }}>
+                          {telegramVinculado ? "🚫 Desvincular Telegram" : "📱 Vincular Telegram"}
+                        </button>
                         <button onClick={fazerLogout} style={{ width:"100%", padding:10, borderRadius:8, border:`1px solid ${T.red}`, background:"transparent", color:T.red, fontSize:13, fontWeight:600, cursor:"pointer" }}>Sair</button>
                       </div>
                     ) : telaCadastro ? (
@@ -683,6 +691,12 @@ export default function TipsterPainel() {
                         {loginErro && <p style={{ color:T.red, fontSize:12, marginBottom:8 }}>{loginErro}</p>}
                         <button onClick={fazerLogin} disabled={loginLoading} style={{ width:"100%", padding:10, borderRadius:8, border:"none", background:T.blue, color:"white", fontSize:13, fontWeight:600, cursor: loginLoading ? "wait" : "pointer", opacity: loginLoading ? 0.6 : 1 }}>{loginLoading ? "Entrando..." : "Entrar"}</button>
                         <p style={{ color:T.muted, fontSize:12, marginTop:10, textAlign:"center" }}>Não tem conta? <span onClick={() => { setTelaCadastro(true); setLoginErro(""); }} style={{ color:T.blue, cursor:"pointer", fontWeight:600 }}>Criar conta</span></p>
+                        <p style={{ color:T.muted, fontSize:12, marginTop:6, textAlign:"center" }}><span onClick={async () => {
+                          if (!loginEmail) { setLoginErro("Digite o email primeiro"); return; }
+                          const { error } = await supabase.auth.resetPasswordForEmail(loginEmail, { redirectTo: window.location.origin });
+                          if (error) setLoginErro(error.message);
+                          else setLoginErro("Email de recuperação enviado!");
+                        }} style={{ color:T.blue, cursor:"pointer", fontWeight:600 }}>Esqueci a senha</span></p>
                       </div>
                     )}
                   </div>
@@ -706,7 +720,7 @@ export default function TipsterPainel() {
             <div className="hero-row" style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", flexWrap:"wrap", gap:16, position:"relative" }}>
               <div>
                 <p style={{ fontSize:11, fontWeight:700, letterSpacing:3, color:T.muted, textTransform:"uppercase", marginBottom:6 }}>
-                  Tipster · banca base {fmtBRL(BANCA_INICIAL)} {userProfile?.moeda || "BRL"}
+                  Tipster · banca base {fmt(BANCA_INICIAL)}
                 </p>
                 <div style={{ display:"flex", flexWrap:"wrap", gap:8, marginBottom:8 }}>
                   {sequencia >= 2 && (
@@ -740,7 +754,7 @@ export default function TipsterPainel() {
                 </div>
                 <p style={{ fontSize:11, color:T.muted, textTransform:"uppercase", letterSpacing:2, marginBottom:4 }}>Banca atual</p>
                 <p style={{ fontSize:36, fontWeight:900, color: isLucroPos ? T.green : T.red, letterSpacing:-1, lineHeight:1 }}>
-                  {fmtBRL(bancaAtual)}
+                  {fmt(bancaAtual)}
                 </p>
                 <div style={{ display:"flex", justifyContent:"flex-end", gap:6, marginTop:8, flexWrap:"wrap" }}>
                   <span style={{ fontSize:13, fontWeight:700, padding:"4px 12px", borderRadius:100, background: isLucroPos ? `${T.green}20` : `${T.red}20`, color: isLucroPos ? T.green : T.red, border:`1px solid ${isLucroPos ? T.green : T.red}40` }}>
@@ -759,11 +773,11 @@ export default function TipsterPainel() {
             {[
               { label:"Apostas", valor:String(apostas.length), sub:`${greens.length}G · ${reds.length}R · ${pendentes.length}P`, cor:T.text },
               { label:"Acerto", valor:`${taxaAcerto.toFixed(1)}%`, sub:`${resolvidasSimples.length} resolvidas`, cor: taxaAcerto>=55 ? T.green : taxaAcerto>0 ? T.red : T.text },
-              { label:"Yield", valor:`${yieldPct>=0?"+":""}${yieldPct.toFixed(1)}%`, sub:fmtBRL(lucroSimples), cor: lucroSimples>=0 ? T.green : T.red },
+              { label:"Yield", valor:`${yieldPct>=0?"+":""}${yieldPct.toFixed(1)}%`, sub:fmt(lucroSimples), cor: lucroSimples>=0 ? T.green : T.red },
               { label:"Odd média", valor:oddMedia.toFixed(2), sub:"apostas simples", cor:T.text },
               { label:"Melhor seq.", valor:`${melhorSeq}G`, sub:"greens seguidos", cor: melhorSeq>=5 ? T.amber : T.text },
               { label:"Drawdown", valor:`${maxDrawdown.toFixed(1)}%`, sub:"queda máxima", cor: maxDrawdown>10 ? T.red : T.text },
-              { label:"Bônus", valor:fmtBRL(lucroBonus), sub: pendBonus>0 ? `${pendBonus} pendente${pendBonus>1?"s":""}` : `${greenBonus}G · ${redBonus}R`, cor: lucroBonus>0 ? T.green : T.text },
+              { label:"Bônus", valor:fmt(lucroBonus), sub: pendBonus>0 ? `${pendBonus} pendente${pendBonus>1?"s":""}` : `${greenBonus}G · ${redBonus}R`, cor: lucroBonus>0 ? T.green : T.text },
             ].map(c => (
               <div key={c.label} style={{ borderRadius:14, padding:"14px 16px", background:T.bgCard, border:`1px solid ${T.border}` }}>
                 <p style={{ fontSize:10, fontWeight:700, textTransform:"uppercase", letterSpacing:1.5, color:T.muted, marginBottom:8 }}>{c.label}</p>
@@ -812,7 +826,7 @@ export default function TipsterPainel() {
                       <XAxis dataKey="data" tick={{ fontSize:10, fill:T.muted }} axisLine={false} tickLine={false} />
                       <YAxis tick={{ fontSize:10, fill:T.muted }} tickFormatter={v=>`R$${v}`} domain={["auto","auto"]} axisLine={false} tickLine={false} width={72} />
                       <ReferenceLine y={BANCA_INICIAL} stroke={T.subtle} strokeDasharray="4 4" />
-                      <Tooltip formatter={(v: any) => [fmtBRL(v),"Banca"]} contentStyle={{ background:T.bgCard, border:`1px solid ${T.border}`, borderRadius:10, fontSize:12, color:T.text }} />
+                      <Tooltip formatter={(v: any) => [fmt(v),"Banca"]} contentStyle={{ background:T.bgCard, border:`1px solid ${T.border}`, borderRadius:10, fontSize:12, color:T.text }} />
                       <Area type="monotone" dataKey="banca" stroke={isLucroPos ? T.green : T.red} strokeWidth={2.5} fill="url(#g1)" dot={false} activeDot={{ r:4, fill: isLucroPos ? T.green : T.red }} />
                     </AreaChart>
                   </ResponsiveContainer>
@@ -856,7 +870,7 @@ export default function TipsterPainel() {
                           <p style={{ fontSize:11, color:T.muted }}>{d.count} apostas · {d.count>0 ? ((d.greens/d.count)*100).toFixed(0) : 0}% acerto</p>
                         </div>
                         <span style={{ fontSize:14, fontWeight:700, color: d.lucro>=0 ? T.green : T.red }}>
-                          {d.lucro>=0?"+":""}{fmtBRL(d.lucro)}
+                          {d.lucro>=0?"+":""}{fmt(d.lucro)}
                         </span>
                       </div>
                     ))
@@ -869,7 +883,7 @@ export default function TipsterPainel() {
                 <div style={{ borderRadius:16, padding:20, background:T.bgCard, border:`1px solid ${T.border}` }}>
                   <p style={{ fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:1.5, color:T.muted, marginBottom:16 }}>Bônus</p>
                   {[
-                    { label:"Lucro total", valor:fmtBRL(lucroBonus), cor: lucroBonus>0 ? T.green : T.text },
+                    { label:"Lucro total", valor:fmt(lucroBonus), cor: lucroBonus>0 ? T.green : T.text },
                     { label:"Convertidos", valor:String(greenBonus), cor:T.green },
                     { label:"Perdidos", valor:String(redBonus), cor:T.red },
                     { label:"Pendentes", valor:String(pendBonus), cor:T.amber },
@@ -901,7 +915,7 @@ export default function TipsterPainel() {
                           <ResultadoBadge resultado={a.resultado} T={T} />
                           {a.resultado !== "pendente" && a.resultado !== "void" && (
                             <span style={{ fontSize:13, fontWeight:700, color: lucro>=0 ? T.green : T.red, minWidth:72, textAlign:"right" }}>
-                              {lucro>=0?"+":""}{fmtBRL(lucro)}
+            {lucro>=0?"+":""}{fmtBRL(lucro, MOEDA)}
                             </span>
                           )}
                         </div>
@@ -1010,12 +1024,12 @@ export default function TipsterPainel() {
               <div className="analise-cards" style={{ display:"grid", gridTemplateColumns: visaoAnalise === "diario" ? "repeat(3,1fr)" : "repeat(4,1fr)", gap:10, marginBottom:16 }}>
                 <div style={{ padding:"14px", borderRadius:12, background:T.bgCard, border:`1px solid ${T.border}` }}>
                   <p style={{ fontSize:10, fontWeight:700, color:T.muted, textTransform:"uppercase", letterSpacing:1 }}>Faturamento</p>
-                  <p style={{ fontSize:20, fontWeight:800, color: lucroVisao >= 0 ? T.green : T.red, marginTop:4 }}>{lucroVisao >= 0 ? "+" : ""}{fmtBRL(lucroVisao)}</p>
+                  <p style={{ fontSize:20, fontWeight:800, color: lucroVisao >= 0 ? T.green : T.red, marginTop:4 }}>{lucroVisao >= 0 ? "+" : ""}{fmt(lucroVisao)}</p>
                 </div>
                 {visaoAnalise !== "diario" && (
                   <div style={{ padding:"14px", borderRadius:12, background:T.bgCard, border:`1px solid ${T.border}` }}>
                     <p style={{ fontSize:10, fontWeight:700, color:T.muted, textTransform:"uppercase", letterSpacing:1 }}>Média/dia</p>
-                    <p style={{ fontSize:20, fontWeight:800, color: mediaVisao >= 0 ? T.green : T.red, marginTop:4 }}>{mediaVisao >= 0 ? "+" : ""}{fmtBRL(mediaVisao)}</p>
+                    <p style={{ fontSize:20, fontWeight:800, color: mediaVisao >= 0 ? T.green : T.red, marginTop:4 }}>{mediaVisao >= 0 ? "+" : ""}{fmt(mediaVisao)}</p>
                     <p style={{ fontSize:11, color:T.muted, marginTop:2 }}>{diasVisao} dias</p>
                   </div>
                 )}
@@ -1027,7 +1041,7 @@ export default function TipsterPainel() {
                 {melhorDiaVisao && (
                   <div style={{ padding:"14px", borderRadius:12, background:T.bgCard, border:`1px solid ${T.border}` }}>
                     <p style={{ fontSize:10, fontWeight:700, color:T.muted, textTransform:"uppercase", letterSpacing:1 }}>Melhor dia</p>
-                    <p style={{ fontSize:16, fontWeight:800, color:T.green, marginTop:4 }}>{fmtBRL(melhorDiaVisao[1])}</p>
+                    <p style={{ fontSize:16, fontWeight:800, color:T.green, marginTop:4 }}>{fmt(melhorDiaVisao[1])}</p>
                     <p style={{ fontSize:11, color:T.muted, marginTop:2 }}>{melhorDiaVisao[0].slice(5)}</p>
                   </div>
                 )}
@@ -1168,7 +1182,7 @@ export default function TipsterPainel() {
                             <p style={{ fontSize:14, fontWeight:800, color:T.text }}>{new Date(diaSelecionado+"T12:00:00").toLocaleDateString("pt-BR",{weekday:"short",day:"2-digit",month:"short"})}</p>
                             <button onClick={() => setDiaSelecionado(null)} style={{ background:"none", border:"none", cursor:"pointer", color:T.muted, fontSize:16 }}>✕</button>
                           </div>
-                          <p style={{ fontSize:18, fontWeight:800, color: lucroDia >= 0 ? T.green : T.red, marginBottom:12 }}>{lucroDia >= 0 ? "+" : ""}{fmtBRL(lucroDia)}</p>
+                          <p style={{ fontSize:18, fontWeight:800, color: lucroDia >= 0 ? T.green : T.red, marginBottom:12 }}>{lucroDia >= 0 ? "+" : ""}{fmt(lucroDia)}</p>
                           {apostasDia.map(a => (
                             <div key={a.id} style={{ padding:"8px 10px", borderRadius:8, background:T.bg, border:`1px solid ${T.border}`, marginBottom:6 }}>
                               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
@@ -1221,7 +1235,7 @@ export default function TipsterPainel() {
               {tooltipDia && (
                 <div style={{ position:"fixed", left:tooltipDia.x, top:tooltipDia.y, transform:"translate(-50%,-100%)", background:T.bgCard, border:`1px solid ${T.border}`, borderRadius:8, padding:"8px 12px", fontSize:12, color:T.text, zIndex:999, pointerEvents:"none", boxShadow:"0 4px 12px rgba(0,0,0,0.3)" }}>
                   <p style={{ fontWeight:700 }}>{new Date(tooltipDia.data+"T12:00:00").toLocaleDateString("pt-BR",{day:"2-digit",month:"short"})}</p>
-                  <p style={{ color: tooltipDia.valor >= 0 ? T.green : T.red, fontWeight:800 }}>{tooltipDia.valor >= 0 ? "+" : ""}{fmtBRL(tooltipDia.valor)}</p>
+                  <p style={{ color: tooltipDia.valor >= 0 ? T.green : T.red, fontWeight:800 }}>{tooltipDia.valor >= 0 ? "+" : ""}{fmt(tooltipDia.valor)}</p>
                   <p style={{ color:T.muted, fontSize:11 }}>{tooltipDia.apostas.length} aposta(s)</p>
                 </div>
               )}
@@ -1242,7 +1256,7 @@ export default function TipsterPainel() {
                 <CardAposta key={aposta.id} aposta={aposta} bancaMomentoCalc={bancaMomentoCalc}
                   expandido={expandido} setExpandido={setExpandido}
                   editando={editando} setEditando={setEditando}
-                  salvarResultado={salvarResultado} excluirAposta={excluirAposta} salvando={salvando} T={T} isAdmin={isAdmin} />
+                  salvarResultado={salvarResultado} excluirAposta={excluirAposta} salvando={salvando} T={T} isAdmin={isAdmin} moeda={MOEDA} />
               ))}
             </div>
           )}
@@ -1260,7 +1274,7 @@ export default function TipsterPainel() {
                 <CardAposta key={aposta.id} aposta={aposta} bancaMomentoCalc={bancaMomentoCalc}
                   expandido={expandido} setExpandido={setExpandido}
                   editando={editando} setEditando={setEditando}
-                  salvarResultado={salvarResultado} excluirAposta={excluirAposta} salvando={salvando} T={T} isAdmin={isAdmin} />
+                  salvarResultado={salvarResultado} excluirAposta={excluirAposta} salvando={salvando} T={T} isAdmin={isAdmin} moeda={MOEDA} />
               ))}
             </div>
           )}
@@ -1286,7 +1300,7 @@ export default function TipsterPainel() {
                 <CardAposta key={aposta.id} aposta={aposta} bancaMomentoCalc={bancaMomentoCalc}
                   expandido={expandido} setExpandido={setExpandido}
                   editando={editando} setEditando={setEditando}
-                  salvarResultado={salvarResultado} excluirAposta={excluirAposta} salvando={salvando} T={T} isAdmin={isAdmin} />
+                  salvarResultado={salvarResultado} excluirAposta={excluirAposta} salvando={salvando} T={T} isAdmin={isAdmin} moeda={MOEDA} />
               ))}
 
               </div>
@@ -1302,7 +1316,7 @@ export default function TipsterPainel() {
                     { label:"Total", valor:String(bonus.length), cor:T.text },
                     { label:"Convertidos", valor:String(greenBonus), cor:T.green },
                     { label:"Perdidos", valor:String(redBonus), cor:T.red },
-                    { label:"Lucro total", valor:fmtBRL(lucroBonus), cor: lucroBonus>0 ? T.green : T.text },
+                    { label:"Lucro total", valor:fmt(lucroBonus), cor: lucroBonus>0 ? T.green : T.text },
                   ].map(c => (
                     <div key={c.label} style={{ borderRadius:12, padding:"14px 16px", background:T.bgCard, border:`1px solid ${T.border}` }}>
                       <p style={{ fontSize:10, fontWeight:700, textTransform:"uppercase", letterSpacing:1.5, color:T.muted, marginBottom:6 }}>{c.label}</p>
@@ -1321,7 +1335,7 @@ export default function TipsterPainel() {
                 <CardAposta key={aposta.id} aposta={aposta} bancaMomentoCalc={{}}
                   expandido={expandido} setExpandido={setExpandido}
                   editando={editando} setEditando={setEditando}
-                  salvarResultado={salvarResultado} excluirAposta={excluirAposta} salvando={salvando} T={T} isAdmin={isAdmin} />
+                  salvarResultado={salvarResultado} excluirAposta={excluirAposta} salvando={salvando} T={T} isAdmin={isAdmin} moeda={MOEDA} />
               ))}
             </div>
           )}
@@ -1346,7 +1360,7 @@ export default function TipsterPainel() {
                             <span style={{ fontSize:11, fontWeight:700, color:T.text }}>{p.casa}</span>
                             {isAdmin && <span onClick={e => { e.stopPropagation(); excluirProgramacao(p.id); }} style={{ fontSize:10, color:T.red, cursor:"pointer", fontWeight:700 }}>✕</span>}
                           </div>
-                          <p style={{ fontSize:13, fontWeight:800, color:T.green, marginTop:4 }}>{fmtBRL(p.valor)}</p>
+                          <p style={{ fontSize:13, fontWeight:800, color:T.green, marginTop:4 }}>{fmt(p.valor)}</p>
                           {p.observacao && <p style={{ fontSize:10, color:T.muted, marginTop:2 }}>{p.observacao}</p>}
                         </div>
                       ))}
@@ -1532,6 +1546,39 @@ export default function TipsterPainel() {
           </div>
         )}
 
+        {/* ── MODAL EDITAR PERFIL ── */}
+        {editProfileMode && (
+          <div style={{ position:"fixed", inset:0, zIndex:300, display:"flex", alignItems:"center", justifyContent:"center", background:"rgba(0,0,0,0.7)", backdropFilter:"blur(6px)", padding:20 }} onClick={() => setEditProfileMode(false)}>
+            <div style={{ background:T.bgCard, border:`1px solid ${T.border}`, borderRadius:18, width:"100%", maxWidth:400, padding:"28px 32px" }} onClick={e => e.stopPropagation()}>
+              <h2 style={{ fontSize:18, fontWeight:800, color:T.text, marginBottom:16, textAlign:"center" }}>Editar Perfil</h2>
+              <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+                <div>
+                  <label style={{ fontSize:11, fontWeight:700, color:T.muted, textTransform:"uppercase", letterSpacing:1, display:"block", marginBottom:4 }}>Nome</label>
+                  <input value={formProfile.nome} onChange={e => setFormProfile({...formProfile, nome:e.target.value})} placeholder="Seu nome" />
+                </div>
+                <div style={{ display:"grid", gridTemplateColumns:"2fr 1fr", gap:10 }}>
+                  <div>
+                    <label style={{ fontSize:11, fontWeight:700, color:T.muted, textTransform:"uppercase", letterSpacing:1, display:"block", marginBottom:4 }}>Banca Inicial</label>
+                    <input type="number" value={formProfile.banca} onChange={e => setFormProfile({...formProfile, banca:e.target.value})} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize:11, fontWeight:700, color:T.muted, textTransform:"uppercase", letterSpacing:1, display:"block", marginBottom:4 }}>Moeda</label>
+                    <select value={formProfile.moeda} onChange={e => setFormProfile({...formProfile, moeda:e.target.value})}>
+                      <option value="BRL">BRL</option>
+                      <option value="USD">USD</option>
+                      <option value="EUR">EUR</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+              <div style={{ display:"flex", gap:10, marginTop:20 }}>
+                <button onClick={() => setEditProfileMode(false)} style={{ flex:1, padding:"12px", borderRadius:10, border:`1px solid ${T.border}`, background:"transparent", color:T.muted, fontSize:14, fontWeight:600, cursor:"pointer" }}>Cancelar</button>
+                <button onClick={salvarEditProfile} style={{ flex:1, padding:"12px", borderRadius:10, border:"none", background:T.blue, color:"white", fontSize:14, fontWeight:700, cursor:"pointer" }}>Salvar</button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* ── MODAL RELATÓRIO ── */}
         {modalRelatorio && (
           <div style={{ position:"fixed", inset:0, zIndex:200, display:"flex", alignItems:"center", justifyContent:"center", background:"rgba(0,0,0,0.7)", backdropFilter:"blur(6px)", padding:20 }} onClick={() => !gerandoRelatorio && setModalRelatorio(false)}>
@@ -1590,12 +1637,12 @@ export default function TipsterPainel() {
 }
 
 // ── Card de aposta ──
-function CardAposta({ aposta, bancaMomentoCalc, expandido, setExpandido, editando, setEditando, salvarResultado, excluirAposta, salvando, T, isAdmin }: {
+function CardAposta({ aposta, bancaMomentoCalc, expandido, setExpandido, editando, setEditando, salvarResultado, excluirAposta, salvando, T, isAdmin, moeda }: {
   aposta: Aposta; bancaMomentoCalc?: Record<string, number>;
   expandido: string | null; setExpandido: (id: string | null) => void;
   editando: { id: string; resultado: Resultado } | null;
   setEditando: (v: { id: string; resultado: Resultado } | null) => void;
-  salvarResultado: () => void; excluirAposta: (id: string) => void; salvando: boolean; T: typeof DARK; isAdmin: boolean;
+  salvarResultado: () => void; excluirAposta: (id: string) => void; salvando: boolean; T: typeof DARK; isAdmin: boolean; moeda?: string;
 }) {
   const lucro = calcularLucro(aposta, bancaMomentoCalc?.[aposta.id]);
   const isExp = expandido === aposta.id;
@@ -1651,7 +1698,7 @@ function CardAposta({ aposta, bancaMomentoCalc, expandido, setExpandido, editand
         <ResultadoBadge resultado={aposta.resultado} T={T} />
         {aposta.resultado !== "pendente" && aposta.resultado !== "void" && (
           <span style={{ fontSize:13, fontWeight:800, flexShrink:0, minWidth:72, textAlign:"right", color: lucro>=0 ? T.green : T.red }}>
-            {lucro>=0?"+":""}{fmtBRL(lucro)}
+            {lucro>=0?"+":""}{fmtBRL(lucro, moeda)}
           </span>
         )}
         <span style={{ fontSize:10, color:T.muted, flexShrink:0 }}>{isExp?"▲":"▼"}</span>
@@ -1664,10 +1711,10 @@ function CardAposta({ aposta, bancaMomentoCalc, expandido, setExpandido, editand
             {[
               { label:"Data", valor:fmtDataLonga(aposta.data) },
               isBonus
-                ? { label:"Depósito bônus", valor:fmtBRL(aposta.valor_bonus ?? 0) }
-                : { label:"Valor apostado", valor:fmtBRL(stakeValor) },
+                ? { label:"Depósito bônus", valor:fmtBRL(aposta.valor_bonus ?? 0, moeda) }
+                : { label:"Valor apostado", valor:fmtBRL(stakeValor, moeda) },
               isBonus
-                ? { label:"Lucro máximo", valor:fmtBRL(aposta.lucro_maximo ?? 0) }
+                ? { label:"Lucro máximo", valor:fmtBRL(aposta.lucro_maximo ?? 0, moeda) }
                 : { label:"Stake", valor:`${aposta.stake_unidades}u` },
               ...(aposta.observacao ? [{ label:"Obs", valor:aposta.observacao }] : []),
             ].map((item, i) => (

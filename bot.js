@@ -39,8 +39,22 @@ bot.on("message", async (msg) => {
     if (userId) {
       await bot.sendMessage(chatId, `✅ Telegram já vinculado!\nMande uma foto de bilhete para cadastrar.`);
     } else {
-      await bot.sendMessage(chatId, `👋 Para vincular, acesse o painel web e clique em "Vincular Telegram".\n\nOu se o admin já vinculou, mande uma foto de bilhete.`);
+      await bot.sendMessage(chatId, `👋 Para vincular, acesse o painel web, clique em "Vincular Telegram" e envie o código aqui.\n\nExemplo: /vincular ABC123`);
     }
+    return;
+  }
+
+  // /vincular CÓDIGO
+  if (msg.text?.startsWith("/vincular ")) {
+    const code = msg.text.replace("/vincular ", "").trim().toUpperCase();
+    const { data: profile } = await supabase.from("user_profiles").select("id").eq("pending_code", code).single();
+    if (!profile?.id) {
+      await bot.sendMessage(chatId, `❌ Código inválido ou expirado.\nGere um novo código no painel web.`);
+      return;
+    }
+    await supabase.from("telegram_vinculos").insert({ chat_id: chatId, user_id: profile.id });
+    await supabase.from("user_profiles").update({ pending_code: null }).eq("id", profile.id);
+    await bot.sendMessage(chatId, `✅ Telegram vinculado com sucesso!\nAgora mande fotos de bilhete para cadastrar.`);
     return;
   }
 
