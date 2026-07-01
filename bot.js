@@ -1,6 +1,5 @@
 import TelegramBot from "node-telegram-bot-api";
 import { readFileSync } from "fs";
-import { join } from "path";
 import { createClient } from "@supabase/supabase-js";
 import { extrairBilhete } from "./lib/extrairBilhete.js";
 
@@ -25,9 +24,27 @@ async function baixarFoto(fileId) {
   return { base64: buffer.toString("base64"), mimeType };
 }
 
+async function encontrarUserId(chatId) {
+  const { data } = await supabase.from("telegram_vinculos").select("user_id").eq("chat_id", chatId).single();
+  return data?.user_id || null;
+}
+
 bot.on("message", async (msg) => {
   const chatId = msg.chat.id;
   const nome = msg.from?.first_name || msg.from?.username || "Desconhecido";
+
+  // /start - vincular telegram
+  if (msg.text === "/start") {
+    const userId = await encontrarUserId(chatId);
+    if (userId) {
+      await bot.sendMessage(chatId, `✅ Telegram já vinculado!\nMande uma foto de bilhete para cadastrar.`);
+    } else {
+      await bot.sendMessage(chatId, `👋 Para vincular, acesse o painel web e clique em "Vincular Telegram".\n\nOu se o admin já vinculou, mande uma foto de bilhete.`);
+    }
+    return;
+  }
+
+  const userId = await encontrarUserId(chatId);
   const caption = msg.caption || "";
   const texto = msg.text || caption || null;
 
@@ -52,6 +69,7 @@ bot.on("message", async (msg) => {
 
   const { error } = await supabase.from("telegram_messages").insert({
     chat_id: chatId,
+    user_id: userId,
     nome,
     texto,
     foto_file_id: fotoFileId,
@@ -62,4 +80,10 @@ bot.on("message", async (msg) => {
 
   if (error) console.error("Erro DB:", error.message);
   else console.log(`[OK] ${nome}: ${texto || "(foto)"}`);
+
+  if (userId) {
+    await bot.sendMessage(chatId, `✅ Bilhete recebido e processado!`);
+  } else {
+    await bot.sendMessage(chatId, `⚠️ Foto recebida, mas seu Telegram não está vinculado.\nAcesse o painel web para vincular.`);
+  }
 });

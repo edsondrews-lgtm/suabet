@@ -20,7 +20,12 @@ interface Aposta {
   banca_momento: number | null; valor_bonus: number | null; lucro_maximo: number | null;
   casa_aposta: string; odd_total: number; resultado: Resultado;
   lucro_reais: number | null; observacao: string | null; created_at: string;
+  user_id: string | null;
   detalhes?: Detalhe[];
+}
+interface UserProfile {
+  id: string; nome: string | null; banca_inicial: number; moeda: string;
+  telegram_chat_id: number | null; created_at: string;
 }
 interface Programacao {
   id: string; casa: string; dia_semana: string; valor: number;
@@ -31,6 +36,7 @@ interface TelegramMessage {
   texto: string | null; foto_file_id: string | null;
   dados_extraidos: DadosBilhete | null;
   status_extracao: string; status: string; created_at: string;
+  user_id: string | null;
 }
 interface DadosBilhete {
   data: string | null; casa_aposta: string | null; stake_unidades: number | null;
@@ -39,7 +45,7 @@ interface DadosBilhete {
 }
 
 // ── Constants ──
-const BANCA_INICIAL = 1000;
+const BANCA_INICIAL_DEFAULT = 1000;
 const CASAS = ['Granawin','BetandYou','BetLabel','WinWin','22Bet','BetSnipe','BET&YOU'];
 const DIAS_SEMANA = ['segunda','terca','quarta','quinta','sexta','sabado','domingo'];
 const DIAS_LABEL: Record<string,string> = {
@@ -50,7 +56,7 @@ const DIAS_LABEL: Record<string,string> = {
 function calcularLucro(a: Aposta, bancaBase?: number): number {
   if (a.resultado === "pendente" || a.resultado === "void") return 0;
   if (a.tipo === "bonus") return a.resultado === "green" ? (a.lucro_maximo ?? 0) : 0;
-  const banca = bancaBase ?? BANCA_INICIAL;
+  const banca = bancaBase ?? BANCA_INICIAL_DEFAULT;
   const stake = ((a.stake_unidades ?? 1) / 100) * banca;
   return a.resultado === "green"
     ? parseFloat((stake * (a.odd_total - 1)).toFixed(2))
@@ -137,24 +143,44 @@ export default function TipsterPainel() {
   const [semanaOffset, setSemanaOffset] = useState(0);
   const [diaSelecionado, setDiaSelecionado] = useState<string | null>(null);
   const [tooltipDia, setTooltipDia] = useState<{ x:number; y:number; data:string; valor:number; apostas:Aposta[] } | null>(null);
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [formProfile, setFormProfile] = useState({ nome: "", banca: "1000", moeda: "BRL" });
+  const [userLogado, setUserLogado] = useState<any>(null);
+  const [adminViewUser, setAdminViewUser] = useState<string | null>(null);
+  const [usuarios, setUsuarios] = useState<{ id: string; nome: string }[]>([]);
+  const [telaCadastro, setTelaCadastro] = useState(false);
+  const [cadastroPass2, setCadastroPass2] = useState("");
 
   const bancaMomentoRef = useRef<Record<string, number>>({});
   const T = dark ? DARK : LIGHT;
+  const BANCA_INICIAL = userProfile?.banca_inicial ?? BANCA_INICIAL_DEFAULT;
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) checkAdmin(session.user.id);
+      if (session?.user) aoLogar(session.user);
     });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session?.user) checkAdmin(session.user.id);
-      else setIsAdmin(false);
+      if (session?.user) aoLogar(session.user);
+      else { setIsAdmin(false); setUserLogado(null); setUserProfile(null); }
     });
     return () => subscription.unsubscribe();
   }, []);
 
-  async function checkAdmin(userId: string) {
-    const { data } = await supabase.from("user_profiles").select("role").eq("id", userId).single();
-    setIsAdmin(data?.role === "admin");
+  async function aoLogar(user: any) {
+    setUserLogado(user);
+    const { data: profile } = await supabase.from("user_profiles").select("*").eq("id", user.id).single();
+    if (profile) {
+      setUserProfile(profile as UserProfile);
+      setIsAdmin(profile.role === "admin");
+    }
+    carregar(user.id);
+  }
+
+  async function vincularTelegram() {
+    if (!userLogado) return;
+    const { data: existing } = await supabase.from("telegram_vinculos").select("chat_id").eq("user_id", userLogado.id).single();
+    if (existing) { alert("Telegram já vinculado!"); return; }
+    alert("Mande /start no bot do Telegram para vincular. O bot vai detectar seu chat_id automaticamente quando você mandar a primeira mensagem.");
   }
 
   const ADMIN_EMAIL_MAP: Record<string, string> = { "edsondrews": "edsondrews@hotmail.com" };
@@ -163,11 +189,46 @@ export default function TipsterPainel() {
     setLoginLoading(true);
     setLoginErro("");
     const email = ADMIN_EMAIL_MAP[loginEmail.trim().toLowerCase()] ?? loginEmail;
-    const { error } = await supabase.auth.signInWithPassword({ email, password: loginPass });
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password: loginPass });
     if (error) setLoginErro(error.message === "Invalid login credentials" ? "Usuário ou senha inválidos" : error.message);
-    else { setMenuLogin(false); setLoginEmail(""); setLoginPass(""); }
+    else {
+      setMenuLogin(false); setLoginEmail(""); setLoginPass("");
+      if (data?.user) {
+        setUserLogado(data.user);
+        const isAdminUser = ADMIN_EMAIL_MAP[loginEmail.trim().toLowerCase()] !== undefined;
+        setIsAdmin(isAdminUser);
+        if (isAdminUser) await carregarUsuarios();
+      }
+    }
     setLoginLoading(false);
   }
+
+  const fazerCadastro = async () => {
+    setLoginLoading(true);
+    setLoginErro("");
+    if (loginPass !== cadastroPass2) { setLoginErro("As senhas não coincidem"); setLoginLoading(false); return; }
+    if (loginPass.length < 6) { setLoginErro("Senha deve ter no mínimo 6 caracteres"); setLoginLoading(false); return; }
+    const { data, error } = await supabase.auth.signUp({ email: loginEmail, password: loginPass });
+    if (error) { setLoginErro(error.message); setLoginLoading(false); return; }
+    if (data?.user) {
+      const { error: profileErr } = await supabase.from("user_profiles").upsert({
+        id: data.user.id,
+        nome: formProfile.nome || loginEmail.split("@")[0],
+        banca_inicial: parseFloat(formProfile.banca) || 1000,
+        moeda: formProfile.moeda,
+      });
+      if (profileErr) { console.error(profileErr); setLoginErro("Conta criada, mas erro ao salvar perfil: " + profileErr.message); setLoginLoading(false); return; }
+      const { data: profile } = await supabase.from("user_profiles").select("*").eq("id", data.user.id).single();
+      setUserLogado(data.user);
+      setUserProfile(profile as UserProfile);
+      setMenuLogin(false);
+      setTelaCadastro(false);
+      setLoginEmail(""); setLoginPass(""); setCadastroPass2("");
+      setFormProfile({ nome: "", banca: "1000", moeda: "BRL" });
+      carregar(data.user.id);
+    }
+    setLoginLoading(false);
+  };
 
   function exportarBackup() {
     const dados = {
@@ -188,10 +249,21 @@ export default function TipsterPainel() {
     await supabase.auth.signOut();
     setIsAdmin(false);
     setMenuLogin(false);
+    setUserLogado(null);
+    setUserProfile(null);
+    setAdminViewUser(null);
+    setUsuarios([]);
   }
 
-  async function carregarTelegram() {
-    const { data } = await supabase.from("telegram_messages").select("*").eq("status", "pendente").order("created_at", { ascending: false });
+  async function carregarUsuarios() {
+    const { data } = await supabase.from("user_profiles").select("id, nome");
+    setUsuarios((data ?? []) as { id: string; nome: string }[]);
+  }
+
+  async function carregarTelegram(userId?: string) {
+    let query = supabase.from("telegram_messages").select("*").eq("status", "pendente").order("created_at", { ascending: false });
+    if (userId && !isAdmin) query = query.eq("user_id", userId);
+    const { data } = await query;
     setTelegramMsgs((data ?? []) as TelegramMessage[]);
   }
 
@@ -234,6 +306,7 @@ export default function TipsterPainel() {
         odd_total: editBilhete.odd_total,
         resultado: "pendente",
         observacao: editMsgTexto || null,
+        user_id: msgSelecionada.user_id || userLogado?.id || null,
       }).select("id").single();
       if (err1 || !apostaInsert) { console.error("Erro ao salvar aposta:", err1); return; }
       const legs = (editBilhete.pernas || []).map(p => ({
@@ -255,18 +328,33 @@ export default function TipsterPainel() {
     carregarTelegram();
   }
 
-  async function carregar() {
+  async function carregar(userId?: string) {
     setLoading(true);
-    const { data: ap } = await supabase.from("tipster_apostas").select("*").order("data",{ascending:true}).order("created_at",{ascending:true});
+    const effectiveUserId = userId || userLogado?.id || null;
+    let queryApostas = supabase.from("tipster_apostas").select("*").order("data",{ascending:true}).order("created_at",{ascending:true});
+    if (isAdmin && adminViewUser) queryApostas = queryApostas.eq("user_id", adminViewUser);
+    else if (effectiveUserId && !isAdmin) queryApostas = queryApostas.eq("user_id", effectiveUserId);
+    const { data: ap } = await queryApostas;
     const { data: det } = await supabase.from("tipster_apostas_detalhes").select("*");
     const { data: prog } = await supabase.from("tipster_programacao").select("*").order("dia_semana");
     const com = (ap ?? []).map((a: Aposta) => ({ ...a, detalhes: (det ?? []).filter((d: Detalhe) => d.aposta_id === a.id) }));
     setApostas(com);
     setProgramacao((prog ?? []) as Programacao[]);
-    await carregarTelegram();
+    await carregarTelegram(effectiveUserId);
     setLoading(false);
   }
-  useEffect(() => { carregar(); }, []);
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        setUserLogado(session.user);
+        const email = session.user.email ?? "";
+        const isAdminUser = Object.values(ADMIN_EMAIL_MAP).includes(email);
+        setIsAdmin(isAdminUser);
+        if (isAdminUser) carregarUsuarios();
+      }
+      carregar();
+    });
+  }, []);
 
   useEffect(() => {
     const channel = supabase.channel("telegram-realtime")
@@ -519,7 +607,7 @@ export default function TipsterPainel() {
               <span style={{ fontWeight:800, fontSize:15, color:T.text, letterSpacing:-0.5 }}>Master Tipster</span>
             </div>
             <div className="nav-actions" style={{ display:"flex", gap:8, alignItems:"center" }}>
-              <button className="nav-btn-text" onClick={carregar} style={{ padding:"6px 14px", borderRadius:8, border:`1px solid ${T.border}`, background:"transparent", color:T.muted, fontSize:12, fontWeight:600, cursor:"pointer" }}>↻ Atualizar</button>
+              <button className="nav-btn-text" onClick={() => carregar()} style={{ padding:"6px 14px", borderRadius:8, border:`1px solid ${T.border}`, background:"transparent", color:T.muted, fontSize:12, fontWeight:600, cursor:"pointer" }}>↻ Atualizar</button>
               {isAdmin && <button onClick={exportarBackup} style={{ padding:"6px 14px", borderRadius:8, border:"none", background:T.amber, color:"#000", fontSize:12, fontWeight:700, cursor:"pointer" }}>💾 Backup</button>}
               {isAdmin && telegramMsgs.filter(m => m.status === "pendente").length > 0 && (
                 <button onClick={() => { setAba("telegram"); }} style={{ position:"relative", padding:"6px 14px", borderRadius:8, border:"none", background:T.green, color:"white", fontSize:12, fontWeight:700, cursor:"pointer" }}>
@@ -530,6 +618,20 @@ export default function TipsterPainel() {
                 </button>
               )}
               {isAdmin && <button onClick={gerarRelatorio} style={{ padding:"6px 14px", borderRadius:8, border:"none", background:T.blue, color:"white", fontSize:12, fontWeight:700, cursor:"pointer" }}>📊 Relatório</button>}
+              {isAdmin && usuarios.length > 0 && (
+                <select value={adminViewUser ?? ""} onChange={e => { setAdminViewUser(e.target.value || null); setTimeout(() => carregar(), 0); }} style={{ padding:"6px 10px", borderRadius:8, border:`1px solid ${T.border}`, background:T.bgCard, color:T.text, fontSize:12, fontWeight:600, cursor:"pointer" }}>
+                  <option value="">Todos os clientes</option>
+                  {usuarios.map(u => <option key={u.id} value={u.id}>{u.nome || u.id.slice(0,8)}</option>)}
+                </select>
+              )}
+              {!isAdmin && userProfile && (
+                <button onClick={vincularTelegram} style={{ padding:"6px 14px", borderRadius:8, border:`1px solid ${T.blue}`, background:"transparent", color:T.blue, fontSize:12, fontWeight:700, cursor:"pointer" }}>
+                  📱 Vincular Telegram
+                </button>
+              )}
+              {userProfile && (
+                <span style={{ fontSize:12, fontWeight:700, color:T.text }}>{userProfile.nome}</span>
+              )}
               <button onClick={() => setDark(!dark)} style={{ width:36, height:36, borderRadius:8, border:`1px solid ${T.border}`, background:"transparent", color:T.muted, cursor:"pointer", fontSize:16, display:"flex", alignItems:"center", justifyContent:"center" }}>
                 {dark ? "☀️" : "🌙"}
               </button>
@@ -538,22 +640,49 @@ export default function TipsterPainel() {
                   {isAdmin ? "● Admin" : "🔑 Login"}
                 </button>
                 {menuLogin && (
-                  <div style={{ position:"absolute", right:0, top:44, background:T.bgCard, border:`1px solid ${T.border}`, borderRadius:12, padding:16, width:260, zIndex:100, boxShadow:"0 8px 32px rgba(0,0,0,0.4)" }}>
+                  <div style={{ position:"absolute", right:0, top:44, background:T.bgCard, border:`1px solid ${T.border}`, borderRadius:12, padding:16, width:280, zIndex:100, boxShadow:"0 8px 32px rgba(0,0,0,0.4)" }}>
                     {isAdmin ? (
                       <div>
                         <p style={{ color:T.text, fontSize:13, marginBottom:12 }}>Logado como <b>Admin</b></p>
                         <button onClick={fazerLogout} style={{ width:"100%", padding:10, borderRadius:8, border:`1px solid ${T.red}`, background:"transparent", color:T.red, fontSize:13, fontWeight:600, cursor:"pointer" }}>Sair</button>
                       </div>
+                    ) : telaCadastro ? (
+                      <div>
+                        <p style={{ color:T.text, fontSize:14, marginBottom:12, fontWeight:700, textAlign:"center" }}>Criar Conta</p>
+                        <input placeholder="Email" value={loginEmail} onChange={e => setLoginEmail(e.target.value)}
+                          style={{ width:"100%", padding:"10px 12px", borderRadius:8, border:`1px solid ${T.border}`, background:T.bg, color:T.text, fontSize:13, marginBottom:8, outline:"none", boxSizing:"border-box" }} />
+                        <input placeholder="Nome" value={formProfile.nome} onChange={e => setFormProfile({...formProfile, nome:e.target.value})}
+                          style={{ width:"100%", padding:"10px 12px", borderRadius:8, border:`1px solid ${T.border}`, background:T.bg, color:T.text, fontSize:13, marginBottom:8, outline:"none", boxSizing:"border-box" }} />
+                        <input placeholder="Senha" type="password" value={loginPass} onChange={e => setLoginPass(e.target.value)}
+                          style={{ width:"100%", padding:"10px 12px", borderRadius:8, border:`1px solid ${T.border}`, background:T.bg, color:T.text, fontSize:13, marginBottom:8, outline:"none", boxSizing:"border-box" }} />
+                        <input placeholder="Confirmar senha" type="password" value={cadastroPass2} onChange={e => setCadastroPass2(e.target.value)}
+                          onKeyDown={e => e.key === "Enter" && fazerCadastro()}
+                          style={{ width:"100%", padding:"10px 12px", borderRadius:8, border:`1px solid ${T.border}`, background:T.bg, color:T.text, fontSize:13, marginBottom:8, outline:"none", boxSizing:"border-box" }} />
+                        <div style={{ display:"grid", gridTemplateColumns:"2fr 1fr", gap:8, marginBottom:10 }}>
+                          <input placeholder="Banca inicial" type="number" value={formProfile.banca} onChange={e => setFormProfile({...formProfile, banca:e.target.value})}
+                            style={{ width:"100%", padding:"10px 12px", borderRadius:8, border:`1px solid ${T.border}`, background:T.bg, color:T.text, fontSize:13, outline:"none", boxSizing:"border-box" }} />
+                          <select value={formProfile.moeda} onChange={e => setFormProfile({...formProfile, moeda:e.target.value})}
+                            style={{ padding:"10px 8px", borderRadius:8, border:`1px solid ${T.border}`, background:T.bg, color:T.text, fontSize:13, outline:"none" }}>
+                            <option value="BRL">BRL</option>
+                            <option value="USD">USD</option>
+                            <option value="EUR">EUR</option>
+                          </select>
+                        </div>
+                        {loginErro && <p style={{ color:T.red, fontSize:12, marginBottom:8 }}>{loginErro}</p>}
+                        <button onClick={fazerCadastro} disabled={loginLoading} style={{ width:"100%", padding:10, borderRadius:8, border:"none", background:T.blue, color:"white", fontSize:13, fontWeight:600, cursor: loginLoading ? "wait" : "pointer", opacity: loginLoading ? 0.6 : 1 }}>{loginLoading ? "Criando..." : "Criar conta"}</button>
+                        <p style={{ color:T.muted, fontSize:12, marginTop:10, textAlign:"center" }}>Já tem conta? <span onClick={() => { setTelaCadastro(false); setLoginErro(""); }} style={{ color:T.blue, cursor:"pointer", fontWeight:600 }}>Entrar</span></p>
+                      </div>
                     ) : (
                       <div>
-                        <p style={{ color:T.text, fontSize:13, marginBottom:12, fontWeight:600 }}>Login Admin</p>
-                        <input placeholder="Usuário" value={loginEmail} onChange={e => setLoginEmail(e.target.value)}
+                        <p style={{ color:T.text, fontSize:14, marginBottom:12, fontWeight:700, textAlign:"center" }}>Entrar</p>
+                        <input placeholder="Email" value={loginEmail} onChange={e => setLoginEmail(e.target.value)}
                           style={{ width:"100%", padding:"10px 12px", borderRadius:8, border:`1px solid ${T.border}`, background:T.bg, color:T.text, fontSize:13, marginBottom:8, outline:"none", boxSizing:"border-box" }} />
                         <input placeholder="Senha" type="password" value={loginPass} onChange={e => setLoginPass(e.target.value)}
                           onKeyDown={e => e.key === "Enter" && fazerLogin()}
                           style={{ width:"100%", padding:"10px 12px", borderRadius:8, border:`1px solid ${T.border}`, background:T.bg, color:T.text, fontSize:13, marginBottom:10, outline:"none", boxSizing:"border-box" }} />
                         {loginErro && <p style={{ color:T.red, fontSize:12, marginBottom:8 }}>{loginErro}</p>}
                         <button onClick={fazerLogin} disabled={loginLoading} style={{ width:"100%", padding:10, borderRadius:8, border:"none", background:T.blue, color:"white", fontSize:13, fontWeight:600, cursor: loginLoading ? "wait" : "pointer", opacity: loginLoading ? 0.6 : 1 }}>{loginLoading ? "Entrando..." : "Entrar"}</button>
+                        <p style={{ color:T.muted, fontSize:12, marginTop:10, textAlign:"center" }}>Não tem conta? <span onClick={() => { setTelaCadastro(true); setLoginErro(""); }} style={{ color:T.blue, cursor:"pointer", fontWeight:600 }}>Criar conta</span></p>
                       </div>
                     )}
                   </div>
@@ -577,7 +706,7 @@ export default function TipsterPainel() {
             <div className="hero-row" style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", flexWrap:"wrap", gap:16, position:"relative" }}>
               <div>
                 <p style={{ fontSize:11, fontWeight:700, letterSpacing:3, color:T.muted, textTransform:"uppercase", marginBottom:6 }}>
-                  Tipster · banca base {fmtBRL(BANCA_INICIAL)}
+                  Tipster · banca base {fmtBRL(BANCA_INICIAL)} {userProfile?.moeda || "BRL"}
                 </p>
                 <div style={{ display:"flex", flexWrap:"wrap", gap:8, marginBottom:8 }}>
                   {sequencia >= 2 && (
@@ -1475,7 +1604,7 @@ function CardAposta({ aposta, bancaMomentoCalc, expandido, setExpandido, editand
   const isBonus = aposta.tipo === "bonus";
   const stakeValor = isBonus
     ? (aposta.valor_bonus ?? 0)
-    : ((aposta.stake_unidades ?? 1) / 100) * (aposta.banca_momento ?? BANCA_INICIAL);
+    : ((aposta.stake_unidades ?? 1) / 100) * (aposta.banca_momento ?? BANCA_INICIAL_DEFAULT);
 
   const labelPrincipal = nLegs <= 1
     ? (aposta.detalhes?.[0]?.jogo ?? "—")

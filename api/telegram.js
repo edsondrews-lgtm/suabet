@@ -14,6 +14,24 @@ export default async function handler(req, res) {
     const msg = update.message;
     const chatId = msg.chat.id;
     const nome = msg.from?.first_name || msg.from?.username || "Desconhecido";
+
+    // /start handler
+    if (msg.text === "/start") {
+      const { data: vinculo } = await supabase.from("telegram_vinculos").select("user_id").eq("chat_id", chatId).single();
+      const text = vinculo
+        ? "✅ Telegram já vinculado! Mande uma foto de bilhete."
+        : '👋 Para vincular, acesse o painel web e clique em "Vincular Telegram".';
+      await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: chatId, text }),
+      });
+      return res.status(200).json({ ok: true });
+    }
+
+    // Find user by chat_id
+    const { data: vinculo } = await supabase.from("telegram_vinculos").select("user_id").eq("chat_id", chatId).single();
+    const userId = vinculo?.user_id || null;
+
     const caption = msg.caption || "";
     const texto = msg.text || caption || null;
 
@@ -37,7 +55,6 @@ export default async function handler(req, res) {
 
         dadosExtraidos = await extrairBilhete(base64, mimeType, caption);
         statusExtracao = "extraido";
-        console.log(`[EXTRAIDO] ${nome}: ${dadosExtraidos.pernas?.length ?? 0} perna(s), odd ${dadosExtraidos.odd_total}`);
       } catch (err) {
         statusExtracao = "erro_extracao";
         console.error(`[ERRO] ${nome}: ${err.message}`);
@@ -46,12 +63,21 @@ export default async function handler(req, res) {
 
     await supabase.from("telegram_messages").insert({
       chat_id: chatId,
+      user_id: userId,
       nome,
       texto,
       foto_file_id: fotoFileId,
       dados_extraidos: dadosExtraidos,
       status_extracao: statusExtracao,
       status: "pendente",
+    });
+
+    const reply = userId
+      ? "✅ Bilhete recebido e processado!"
+      : "⚠️ Foto recebida, mas seu Telegram não está vinculado. Acesse o painel web para vincular.";
+    await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text: reply }),
     });
   }
 
