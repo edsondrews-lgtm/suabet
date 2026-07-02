@@ -1661,10 +1661,13 @@ export default function TipsterPainel() {
                   style={{ borderRadius:12, padding:"14px 16px", background:T.bgCard, border:`1px solid ${T.border}`, cursor:"pointer" }}>
                   <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:8, marginBottom:10 }}>
                     <div>
-                      <p style={{ fontSize:14, fontWeight:800, color:T.text }}>{u.nome || "(sem nome)"} <span style={{ fontSize:11, color:T.blue, fontWeight:600 }}>→ ver apostas</span></p>
+                      <p style={{ fontSize:14, fontWeight:800, color:T.text }}>{u.nome || "(sem nome)"}</p>
                       <p style={{ fontSize:11, color:T.muted }}>Cadastrado em {new Date(u.created_at).toLocaleDateString("pt-BR")}</p>
                     </div>
-                    <span style={{ fontSize:11, fontWeight:700, padding:"3px 10px", borderRadius:100, background:`${T.blue}18`, color:T.blue }}>{u.moeda}</span>
+                    <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                      <span style={{ fontSize:11, fontWeight:700, padding:"3px 10px", borderRadius:100, background:`${T.blue}18`, color:T.blue }}>{u.moeda}</span>
+                      <button style={{ padding:"6px 12px", borderRadius:8, border:"none", background:T.blue, color:"white", fontSize:12, fontWeight:700, cursor:"pointer" }}>Ver apostas →</button>
+                    </div>
                   </div>
                   <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(110px, 1fr))", gap:8 }}>
                     {[
