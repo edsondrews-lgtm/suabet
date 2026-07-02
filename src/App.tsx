@@ -181,6 +181,12 @@ export default function TipsterPainel() {
   const [salvandoAposta, setSalvandoAposta] = useState(false);
   const [usuarios, setUsuarios] = useState<UsuarioRelatorio[]>([]);
   const [loadingUsuarios, setLoadingUsuarios] = useState(false);
+  const [apostasPorUsuario, setApostasPorUsuario] = useState<Record<string, Aposta[]>>({});
+  const [clienteSelecionado, setClienteSelecionado] = useState<string | null>(null);
+  const [filtroResultado, setFiltroResultado] = useState<string>("todos");
+  const [filtroCasaCliente, setFiltroCasaCliente] = useState<string>("todas");
+  const [filtroOrigemCliente, setFiltroOrigemCliente] = useState<string>("todas");
+  const [filtroMesCliente, setFiltroMesCliente] = useState<string>("");
 
   const bancaMomentoRef = useRef<Record<string, number>>({});
   const T = dark ? DARK : LIGHT;
@@ -485,12 +491,18 @@ export default function TipsterPainel() {
     const { data: perfis } = await supabase.from("user_profiles").select("*").order("created_at", { ascending: false });
     const { data: todasApostas } = await supabase.from("tipster_apostas").select("*")
       .order("data", { ascending: true }).order("created_at", { ascending: true });
+    const apostaIds = (todasApostas ?? []).map((a: Aposta) => a.id);
+    const { data: todosDet } = apostaIds.length > 0
+      ? await supabase.from("tipster_apostas_detalhes").select("*").in("aposta_id", apostaIds)
+      : { data: [] as Detalhe[] };
     const porUsuario: Record<string, Aposta[]> = {};
     (todasApostas ?? []).forEach((a: Aposta) => {
       const uid = a.user_id || "sem_dono";
+      const comDetalhes = { ...a, detalhes: (todosDet ?? []).filter((d: Detalhe) => d.aposta_id === a.id) };
       if (!porUsuario[uid]) porUsuario[uid] = [];
-      porUsuario[uid].push(a);
+      porUsuario[uid].push(comDetalhes);
     });
+    setApostasPorUsuario(porUsuario);
     const relatorio: UsuarioRelatorio[] = (perfis ?? []).map((p: UserProfile) => {
       const lista = porUsuario[p.id] ?? [];
       const bancaInicial = p.banca_inicial ?? BANCA_INICIAL_DEFAULT;
@@ -800,7 +812,7 @@ export default function TipsterPainel() {
                     <div style={{ position:"absolute", right:0, top:44, background:T.bgCard, border:`1px solid ${T.border}`, borderRadius:12, padding:8, width:200, zIndex:100, boxShadow:"0 8px 32px rgba(0,0,0,0.4)", display:"flex", flexDirection:"column", gap:4 }}>
                       <button onClick={() => { setMenuAdmin(false); exportarBackup(); }} style={{ width:"100%", textAlign:"left", padding:10, borderRadius:8, border:"none", background:"transparent", color:T.text, fontSize:13, fontWeight:600, cursor:"pointer" }}>💾 Backup</button>
                       <button onClick={() => { setMenuAdmin(false); gerarRelatorio(); }} style={{ width:"100%", textAlign:"left", padding:10, borderRadius:8, border:"none", background:"transparent", color:T.text, fontSize:13, fontWeight:600, cursor:"pointer" }}>📊 Relatório</button>
-                      <button onClick={() => { setMenuAdmin(false); setAba("usuarios"); carregarUsuarios(); }} style={{ width:"100%", textAlign:"left", padding:10, borderRadius:8, border:"none", background:"transparent", color:T.text, fontSize:13, fontWeight:600, cursor:"pointer" }}>👥 Usuários</button>
+                      <button onClick={() => { setMenuAdmin(false); setClienteSelecionado(null); setAba("usuarios"); carregarUsuarios(); }} style={{ width:"100%", textAlign:"left", padding:10, borderRadius:8, border:"none", background:"transparent", color:T.text, fontSize:13, fontWeight:600, cursor:"pointer" }}>👥 Usuários</button>
                     </div>
                   )}
                 </div>
@@ -1630,7 +1642,7 @@ export default function TipsterPainel() {
           )}
 
           {/* ── ABA USUÁRIOS (admin) ── */}
-          {aba === "usuarios" && isAdmin && (
+          {aba === "usuarios" && isAdmin && !clienteSelecionado && (
             <div style={{ display:"flex", flexDirection:"column", gap:10, animation:"fadeIn 0.3s ease" }}>
               <p style={{ fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:1.5, color:T.muted }}>Usuários cadastrados ({usuarios.length})</p>
               {loadingUsuarios && (
@@ -1645,10 +1657,11 @@ export default function TipsterPainel() {
                 </div>
               )}
               {!loadingUsuarios && usuarios.map(u => (
-                <div key={u.id} style={{ borderRadius:12, padding:"14px 16px", background:T.bgCard, border:`1px solid ${T.border}` }}>
+                <div key={u.id} onClick={() => { setClienteSelecionado(u.id); setFiltroResultado("todos"); setFiltroCasaCliente("todas"); setFiltroOrigemCliente("todas"); setFiltroMesCliente(""); }}
+                  style={{ borderRadius:12, padding:"14px 16px", background:T.bgCard, border:`1px solid ${T.border}`, cursor:"pointer" }}>
                   <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:8, marginBottom:10 }}>
                     <div>
-                      <p style={{ fontSize:14, fontWeight:800, color:T.text }}>{u.nome || "(sem nome)"}</p>
+                      <p style={{ fontSize:14, fontWeight:800, color:T.text }}>{u.nome || "(sem nome)"} <span style={{ fontSize:11, color:T.blue, fontWeight:600 }}>→ ver apostas</span></p>
                       <p style={{ fontSize:11, color:T.muted }}>Cadastrado em {new Date(u.created_at).toLocaleDateString("pt-BR")}</p>
                     </div>
                     <span style={{ fontSize:11, fontWeight:700, padding:"3px 10px", borderRadius:100, background:`${T.blue}18`, color:T.blue }}>{u.moeda}</span>
@@ -1673,6 +1686,70 @@ export default function TipsterPainel() {
               ))}
             </div>
           )}
+
+          {/* ── ABA USUÁRIOS: detalhe de um cliente ── */}
+          {aba === "usuarios" && isAdmin && clienteSelecionado && (() => {
+            const cliente = usuarios.find(u => u.id === clienteSelecionado);
+            const listaCliente = apostasPorUsuario[clienteSelecionado] ?? [];
+            const casasCliente = Array.from(new Set(listaCliente.map(a => a.casa_aposta).filter(Boolean)));
+            const bancaMomentoCliente: Record<string, number> = {};
+            let bancaAcumCliente = cliente?.banca_inicial ?? BANCA_INICIAL_DEFAULT;
+            for (const a of listaCliente) {
+              bancaMomentoCliente[a.id] = bancaAcumCliente;
+              if (a.resultado !== "pendente" && a.resultado !== "void") {
+                bancaAcumCliente = parseFloat((bancaAcumCliente + calcularLucro(a, bancaAcumCliente)).toFixed(2));
+              }
+            }
+            const listaFiltrada = [...listaCliente].reverse().filter(a => {
+              if (filtroResultado !== "todos" && a.resultado !== filtroResultado) return false;
+              if (filtroCasaCliente !== "todas" && a.casa_aposta !== filtroCasaCliente) return false;
+              if (filtroOrigemCliente !== "todas" && (a.origem || "desconhecido") !== filtroOrigemCliente) return false;
+              if (filtroMesCliente && !a.data.startsWith(filtroMesCliente)) return false;
+              return true;
+            });
+            return (
+              <div style={{ display:"flex", flexDirection:"column", gap:10, animation:"fadeIn 0.3s ease" }}>
+                <button onClick={() => setClienteSelecionado(null)} style={{ alignSelf:"flex-start", padding:"6px 12px", borderRadius:8, border:`1px solid ${T.border}`, background:"transparent", color:T.muted, fontSize:12, fontWeight:700, cursor:"pointer" }}>← Voltar</button>
+                <p style={{ fontSize:14, fontWeight:800, color:T.text }}>{cliente?.nome || "(sem nome)"} · {listaFiltrada.length} de {listaCliente.length} apostas</p>
+                <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
+                  <select value={filtroResultado} onChange={e => setFiltroResultado(e.target.value)} style={{ padding:"7px 10px", borderRadius:8, border:`1px solid ${T.border}`, background:T.bg, color:T.text, fontSize:12 }}>
+                    <option value="todos">Resultado: todos</option>
+                    <option value="green">Green</option>
+                    <option value="red">Red</option>
+                    <option value="pendente">Pendente</option>
+                    <option value="void">Void</option>
+                  </select>
+                  <select value={filtroCasaCliente} onChange={e => setFiltroCasaCliente(e.target.value)} style={{ padding:"7px 10px", borderRadius:8, border:`1px solid ${T.border}`, background:T.bg, color:T.text, fontSize:12 }}>
+                    <option value="todas">Casa: todas</option>
+                    {casasCliente.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                  <select value={filtroOrigemCliente} onChange={e => setFiltroOrigemCliente(e.target.value)} style={{ padding:"7px 10px", borderRadius:8, border:`1px solid ${T.border}`, background:T.bg, color:T.text, fontSize:12 }}>
+                    <option value="todas">Origem: todas</option>
+                    <option value="telegram">✈️ Telegram</option>
+                    <option value="manual">✍️ Manual</option>
+                    <option value="desconhecido">Desconhecida</option>
+                  </select>
+                  <input type="month" value={filtroMesCliente} onChange={e => setFiltroMesCliente(e.target.value)} style={{ padding:"7px 10px", borderRadius:8, border:`1px solid ${T.border}`, background:T.bg, color:T.text, fontSize:12 }} />
+                  {(filtroResultado !== "todos" || filtroCasaCliente !== "todas" || filtroOrigemCliente !== "todas" || filtroMesCliente) && (
+                    <button onClick={() => { setFiltroResultado("todos"); setFiltroCasaCliente("todas"); setFiltroOrigemCliente("todas"); setFiltroMesCliente(""); }} style={{ padding:"7px 10px", borderRadius:8, border:`1px solid ${T.border}`, background:"transparent", color:T.muted, fontSize:12, cursor:"pointer" }}>Limpar filtros</button>
+                  )}
+                </div>
+                {listaFiltrada.length === 0 && (
+                  <div style={{ textAlign:"center", padding:"60px 0", color:T.muted }}>
+                    <p style={{ fontSize:32, marginBottom:8 }}>🔍</p>
+                    <p style={{ fontSize:14 }}>Nenhuma aposta com esses filtros.</p>
+                  </div>
+                )}
+                {listaFiltrada.map(aposta => (
+                  <CardAposta key={aposta.id} aposta={aposta} bancaMomentoCalc={bancaMomentoCliente}
+                    expandido={expandido} setExpandido={setExpandido}
+                    editando={editando} setEditando={setEditando}
+                    salvarResultado={salvarResultado} excluirAposta={excluirAposta} salvando={salvando} T={T} moeda={cliente?.moeda}
+                    podeEditar={false} />
+                ))}
+              </div>
+            );
+          })()}
 
           {/* ── MODAL CONFIRMAÇÃO TELEGRAM ── */}
         {modalTelegram && msgSelecionada && (
