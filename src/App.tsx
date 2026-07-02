@@ -196,12 +196,11 @@ export default function TipsterPainel() {
   const fmt = (v: number) => fmtBRL(v, MOEDA);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) aoLogar(session.user);
-    });
+    // onAuthStateChange já dispara uma vez com a sessão atual ao inscrever,
+    // então não precisa de um getSession() separado (isso causava busca dupla)
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session?.user) aoLogar(session.user);
-      else { setIsAdmin(false); setUserLogado(null); setUserProfile(null); }
+      else { setIsAdmin(false); setUserLogado(null); setUserProfile(null); carregar(); }
     });
     return () => subscription.unsubscribe();
   }, []);
@@ -529,16 +528,6 @@ export default function TipsterPainel() {
     setUsuarios(relatorio);
     setLoadingUsuarios(false);
   }
-
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        aoLogar(session.user);
-      } else {
-        carregar();
-      }
-    });
-  }, []);
 
   useEffect(() => {
     const channel = supabase.channel("telegram-realtime")
