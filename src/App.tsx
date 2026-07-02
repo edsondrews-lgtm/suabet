@@ -27,6 +27,7 @@ interface Aposta {
 interface UserProfile {
   id: string; nome: string | null; banca_inicial: number; moeda: string;
   telegram_chat_id: number | null; created_at: string; role?: string;
+  stake_tipo_padrao?: StakeTipo;
 }
 interface UsuarioRelatorio {
   id: string; nome: string | null; moeda: string; banca_inicial: number; created_at: string;
@@ -170,7 +171,7 @@ export default function TipsterPainel() {
   const [diaSelecionado, setDiaSelecionado] = useState<string | null>(null);
   const [tooltipDia, setTooltipDia] = useState<{ x:number; y:number; data:string; valor:number; apostas:Aposta[] } | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
-  const [formProfile, setFormProfile] = useState({ nome: "", banca: "1000", moeda: "BRL" });
+  const [formProfile, setFormProfile] = useState({ nome: "", banca: "1000", moeda: "BRL", stake_tipo_padrao: "valor" as StakeTipo });
   const [userLogado, setUserLogado] = useState<any>(null);
   const [telaCadastro, setTelaCadastro] = useState(false);
   const [cadastroPass2, setCadastroPass2] = useState("");
@@ -266,7 +267,7 @@ export default function TipsterPainel() {
       setMenuLogin(false);
       setTelaCadastro(false);
       setLoginEmail(""); setLoginPass(""); setCadastroPass2("");
-      setFormProfile({ nome: "", banca: "1000", moeda: "BRL" });
+      setFormProfile({ nome: "", banca: "1000", moeda: "BRL", stake_tipo_padrao: "valor" });
     } else {
       setTelaCadastro(false);
       setLoginErro("Conta criada! Verifique seu email e confirme antes de entrar.");
@@ -276,7 +277,7 @@ export default function TipsterPainel() {
 
   function abrirEditarPerfil() {
     setMenuLogin(false);
-    setFormProfile({ nome: userProfile?.nome || "", banca: String(userProfile?.banca_inicial || 1000), moeda: userProfile?.moeda || "BRL" });
+    setFormProfile({ nome: userProfile?.nome || "", banca: String(userProfile?.banca_inicial || 1000), moeda: userProfile?.moeda || "BRL", stake_tipo_padrao: userProfile?.stake_tipo_padrao || "valor" });
     setEditProfileMode(true);
   }
 
@@ -287,6 +288,7 @@ export default function TipsterPainel() {
       nome: formProfile.nome || userProfile?.nome || "",
       banca_inicial: parseFloat(formProfile.banca) || userProfile?.banca_inicial || 1000,
       moeda: formProfile.moeda || userProfile?.moeda || "BRL",
+      stake_tipo_padrao: formProfile.stake_tipo_padrao || "valor",
     });
     if (error) { alert("Erro ao salvar: " + error.message); return; }
     const { data } = await supabase.from("user_profiles").select("*").eq("id", userLogado.id).single();
@@ -331,7 +333,7 @@ export default function TipsterPainel() {
     setEditMode(false);
     if (msg.dados_extraidos) {
       const clone = JSON.parse(JSON.stringify(msg.dados_extraidos));
-      if (!clone.stake_tipo) clone.stake_tipo = "unidades";
+      if (!clone.stake_tipo) clone.stake_tipo = userProfile?.stake_tipo_padrao || "valor";
       setEditBilhete(clone);
     } else {
       setEditBilhete(null);
@@ -355,7 +357,7 @@ export default function TipsterPainel() {
   }
 
   function abrirNovaAposta() {
-    setFormAposta(apostaFormVazio());
+    setFormAposta({ ...apostaFormVazio(), stake_tipo: userProfile?.stake_tipo_padrao || "valor" });
     setModalAposta(true);
   }
 
@@ -1965,6 +1967,14 @@ export default function TipsterPainel() {
                       <option value="EUR">EUR</option>
                     </select>
                   </div>
+                </div>
+                <div>
+                  <label style={{ fontSize:11, fontWeight:700, color:T.muted, textTransform:"uppercase", letterSpacing:1, display:"block", marginBottom:4 }}>Como registrar o stake por padrão</label>
+                  <div style={{ display:"flex", gap:8 }}>
+                    <button type="button" onClick={() => setFormProfile({...formProfile, stake_tipo_padrao:"valor"})} style={{ flex:1, padding:10, borderRadius:8, border:"none", cursor:"pointer", fontSize:13, fontWeight:700, background:formProfile.stake_tipo_padrao==="valor"?T.blue:T.bg, color:formProfile.stake_tipo_padrao==="valor"?"white":T.muted }}>Valor fixo ({formProfile.moeda})</button>
+                    <button type="button" onClick={() => setFormProfile({...formProfile, stake_tipo_padrao:"unidades"})} style={{ flex:1, padding:10, borderRadius:8, border:"none", cursor:"pointer", fontSize:13, fontWeight:700, background:formProfile.stake_tipo_padrao==="unidades"?T.blue:T.bg, color:formProfile.stake_tipo_padrao==="unidades"?"white":T.muted }}>Unidades (% banca)</button>
+                  </div>
+                  <p style={{ fontSize:10, color:T.muted, marginTop:4 }}>Toda aposta nova (Telegram ou manual) já vem marcada com essa opção — dá pra trocar bilhete por bilhete se precisar.</p>
                 </div>
               </div>
               <div style={{ display:"flex", gap:10, marginTop:20 }}>
